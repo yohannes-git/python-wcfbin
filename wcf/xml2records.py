@@ -25,7 +25,6 @@ from wcf.records import (
     BoolTextRecord, UuidTextRecord, UniqueIdTextRecord,
     Bytes8TextRecord, Bytes16TextRecord, Bytes32TextRecord, DictionaryTextRecord,
     CommentRecord,
-    dump_records,
 )
 from wcf.datatypes import Decimal
 from wcf.records.attributes import PREFIX_ATTRIBUTES, PREFIX_DICTIONARY_ATTRIBUTES

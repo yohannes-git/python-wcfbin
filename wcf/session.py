@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from io import BytesIO
 
 from wcf.errors import WcfBinaryError, binary_errors
-from wcf.datatypes import MultiByteInt31, Utf8String, read_exact, read_mbi31, read_utf8, mbi31_bytes, utf8_bytes
+from wcf.datatypes import mbi31_bytes, read_exact, read_mbi31, read_utf8, utf8_bytes
 from wcf.dictionary import dictionary_context
 from wcf.records import DEFAULT_QUOTAS, Record, dump_records, render_xml
 from wcf.xml2records import XMLParser
@@ -65,8 +65,8 @@ def encode_string_table(strings):
     >>> encode_string_table([])
     b'\x00'
     """
-    data = b''.join(Utf8String(string).to_bytes() for string in strings)
-    return MultiByteInt31(len(data)).to_bytes() + data
+    data = b''.join(utf8_bytes(string) for string in strings)
+    return mbi31_bytes(len(data)) + data
 
 
 class BinaryXmlSession:
@@ -191,7 +191,7 @@ class BinaryXmlSession:
         new_strings = tuple(new_strings)
         if not all(isinstance(string, str) for string in new_strings):
             raise TypeError('MC-NBFSE strings must be Unicode')
-        table = b''.join(Utf8String(string).to_bytes() for string in new_strings)
+        table = b''.join(utf8_bytes(string) for string in new_strings)
         if len(table) > self._max_table_bytes:
             raise WcfBinaryError('MC-NBFSE StringTable size limit exceeded')
         entries, reverse = self._new_entries(new_strings, len(table))
@@ -203,7 +203,7 @@ class BinaryXmlSession:
         else:  # no ChainMap (Python lookups) without new strings
             scope = dictionary_context(self._entries, self._value_to_id)
         with scope:
-            data = (MultiByteInt31(len(table)).to_bytes() + table +
+            data = (mbi31_bytes(len(table)) + table +
                     dump_records(make_records()))
         if len(data) > self._max_document_bytes:
             raise WcfBinaryError('MC-NBFSE document size limit exceeded')

@@ -28,7 +28,7 @@
 #  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """Attribute records (MC-NBFX 2.2.2)."""
 
-from wcf.datatypes import MultiByteInt31, Utf8String, read_mbi31, read_utf8, mbi31_bytes, utf8_bytes
+from wcf.datatypes import mbi31_bytes, read_mbi31, read_utf8, utf8_bytes
 from wcf.dictionary import dictionary
 from wcf.records.base import (Attribute, Record, _DictionaryName, _NamedRecord,
                               letter_records, read_attribute_text,

@@ -34,7 +34,8 @@ import string
 from contextvars import ContextVar
 
 from wcf.errors import WcfBinaryError, binary_errors
-from wcf.datatypes import MultiByteInt31, Utf8String, read_exact, read_mbi31, read_utf8, mbi31_bytes, utf8_bytes
+from wcf.datatypes import (MultiByteInt31, mbi31_bytes, read_exact, read_mbi31,
+                           read_utf8, utf8_bytes)
 from wcf.dictionary import dictionary
 from wcf.xmltext import comment, escape_attribute, ncname
 

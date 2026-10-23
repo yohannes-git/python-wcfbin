@@ -38,7 +38,7 @@ import struct
 import uuid
 
 from wcf.errors import WcfBinaryError
-from wcf.datatypes import Decimal, MultiByteInt31, read_exact, read_struct, read_mbi31, mbi31_bytes
+from wcf.datatypes import Decimal, mbi31_bytes, read_exact, read_mbi31, read_struct
 from wcf.dictionary import dictionary
 from wcf.records.base import Record, Text, charge
 
