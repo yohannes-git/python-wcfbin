@@ -26,301 +26,107 @@
 #  THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 #  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 #  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+"""Element records (MC-NBFX 2.2.1)."""
+
+from wcf.records.base import Element, Record, _DictionaryName, _NamedRecord, letter_records
+
+__all__ = ['ShortElementRecord', 'ElementRecord', 'ShortDictionaryElementRecord',
+           'DictionaryElementRecord', 'PrefixElementRecord',
+           'PrefixDictionaryElementRecord', 'PREFIX_ELEMENTS',
+           'PREFIX_DICTIONARY_ELEMENTS']
 
 
-import sys
-import struct
-import logging
+class _ElementRecord(_NamedRecord, Element):
+    """An element: its names (see _NamedRecord) then its attributes."""
+    _what = 'element'
 
-log = logging.getLogger(__name__)
-
-from wcf.datatypes import *
-from wcf.records.base import *
-from wcf.dictionary import *
-
-
-class ShortElementRecord(Element):
-    type = 0x40
-
-    def __init__(self, name):
-        self.childs = []
-        self.name = validate_xml_name(name, 'element name')
+    def __init__(self, *names):
+        self._set_names(names)
         self.attributes = []
+        self.childs = []
 
     def to_bytes(self):
-        """
-        >>> ShortElementRecord('Envelope').to_bytes()
-        b'@\\x08Envelope'
-        """
-        string = Utf8String(validate_xml_name(self.name, 'element name'))
-
-        bt = (super(ShortElementRecord, self).to_bytes() +
-              string.to_bytes())
-
-        for attr in self.attributes:
-            bt += attr.to_bytes()
-        return bytes(bt)
-
-    def __str__(self):
-        # return '<%s[name=%s]>' % (type(self).__name__, self.name)
-        attribs = ' '.join([str(a) for a in self.attributes])
-        if attribs:
-            attribs = ' ' + attribs
-        return '<%s%s>' % (self.name, attribs)
+        return bytes(self._head() + b''.join(a.to_bytes() for a in self.attributes))
 
     @classmethod
     def parse(cls, fp):
-        r"""
-        >>> from io import BytesIO
-        >>> fp = BytesIO(b'\x08Envelope')
-        >>> ser = ShortElementRecord.parse(fp)
-        >>> str(ser)
-        '<Envelope>'
-        """
-        name = Utf8String.parse(fp).value
-        return cls(name)
+        return cls(*cls._read_names(fp))
+
+
+class ShortElementRecord(_ElementRecord):
+    """
+    >>> ShortElementRecord('Envelope').to_bytes()
+    b'@\\x08Envelope'
+    >>> from io import BytesIO
+    >>> str(ShortElementRecord.parse(BytesIO(b'\\x08Envelope')))
+    '<Envelope>'
+    """
+    type = 0x40
 
 
 class ElementRecord(ShortElementRecord):
+    """
+    >>> ElementRecord('x', 'Envelope').to_bytes()
+    b'A\\x01x\\x08Envelope'
+    >>> from io import BytesIO
+    >>> str(ElementRecord.parse(BytesIO(b'\\x01x\\x08Envelope')))
+    '<x:Envelope>'
+    """
     type = 0x41
-
-    def __init__(self, prefix, name):
-        super(ElementRecord, self).__init__(name)
-        self.prefix = validate_xml_name(prefix, 'element prefix')
-
-    def to_bytes(self):
-        """
-        >>> ElementRecord('x', 'Envelope').to_bytes()
-        b'A\\x01x\\x08Envelope'
-        """
-        pref = Utf8String(validate_xml_name(self.prefix, 'element prefix'))
-        data = super(ElementRecord, self).to_bytes()
-        type = data[0:1]
-        return bytes(type + pref.to_bytes() + data[1:])
-
-    def __str__(self):
-        attribs = ' '.join([str(a) for a in self.attributes])
-        if attribs:
-            attribs = ' ' + attribs
-        return '<%s:%s%s>' % (self.prefix, self.name, attribs)
-
-    @classmethod
-    def parse(cls, fp):
-        r"""
-        >>> from io import BytesIO
-        >>> fp = BytesIO(b'\x01x\x08Envelope')
-        >>> er = ElementRecord.parse(fp)
-        >>> str(er)
-        '<x:Envelope>'
-        """
-        prefix = Utf8String.parse(fp).value
-        name = Utf8String.parse(fp).value
-        return cls(prefix, name)
+    _has_prefix = True
 
 
-class ShortDictionaryElementRecord(Element):
+class ShortDictionaryElementRecord(_DictionaryName, _ElementRecord):
+    """
+    >>> ShortDictionaryElementRecord(2).to_bytes()
+    b'B\\x02'
+    >>> from io import BytesIO
+    >>> str(ShortDictionaryElementRecord.parse(BytesIO(b'\\x02')))
+    '<Envelope>'
+    """
     type = 0x42
-
-    def __init__(self, index):
-        self.childs = []
-        self.index = index
-        self.attributes = []
-        validate_dictionary_xml_name(self.index, 'element name')
-
-    @property
-    def name(self):
-        """Resolved on use, so that it always matches the index written."""
-        return dictionary[self.index]
-
-    def __str__(self):
-        attribs = ' '.join([str(a) for a in self.attributes])
-        if attribs:
-            attribs = ' ' + attribs
-        return '<%s%s>' % (self.name, attribs)
-
-    def to_bytes(self):
-        """
-        >>> ShortDictionaryElementRecord(2).to_bytes()
-        b'B\\x02'
-        """
-        validate_dictionary_xml_name(self.index, 'element name')
-        string = MultiByteInt31(self.index)
-
-        bt = (super(ShortDictionaryElementRecord, self).to_bytes() +
-              string.to_bytes())
-
-        for attr in self.attributes:
-            bt += attr.to_bytes()
-        return bytes(bt)
-
-    @classmethod
-    def parse(cls, fp):
-        r"""
-        >>> from io import BytesIO
-        >>> fp = BytesIO(b'\x02')
-        >>> sder = ShortDictionaryElementRecord.parse(fp)
-        >>> str(sder)
-        '<Envelope>'
-        """
-        index = MultiByteInt31.parse(fp).value
-        return cls(index)
+    _by_index = True
 
 
-class DictionaryElementRecord(Element):
+class DictionaryElementRecord(ShortDictionaryElementRecord):
+    """
+    >>> DictionaryElementRecord('x', 2).to_bytes()
+    b'C\\x01x\\x02'
+    >>> from io import BytesIO
+    >>> str(DictionaryElementRecord.parse(BytesIO(b'\\x01x\\x02')))
+    '<x:Envelope>'
+    """
     type = 0x43
-
-    def __init__(self, prefix, index):
-        self.childs = []
-        self.prefix = validate_xml_name(prefix, 'element prefix')
-        self.index = index
-        self.attributes = []
-        validate_dictionary_xml_name(self.index, 'element name')
-
-    @property
-    def name(self):
-        """Resolved on use, so that it always matches the index written."""
-        return dictionary[self.index]
-
-    def __str__(self):
-        """
-        >>> str(DictionaryElementRecord('x', 2))
-        '<x:Envelope>'
-        """
-        attribs = ' '.join([str(a) for a in self.attributes])
-        if attribs:
-            attribs = ' ' + attribs
-        return '<%s:%s%s>' % (self.prefix, self.name, attribs)
-
-    def to_bytes(self):
-        """
-        >>> DictionaryElementRecord('x', 2).to_bytes()
-        b'C\\x01x\\x02'
-        """
-        validate_dictionary_xml_name(self.index, 'element name')
-        pref = Utf8String(validate_xml_name(self.prefix, 'element prefix'))
-        string = MultiByteInt31(self.index)
-
-        bt = (super(DictionaryElementRecord, self).to_bytes() +
-              pref.to_bytes() +
-              string.to_bytes())
-
-        for attr in self.attributes:
-            bt += attr.to_bytes()
-        return bytes(bt)
-
-    @classmethod
-    def parse(cls, fp):
-        r"""
-        >>> from io import BytesIO
-        >>> fp = BytesIO(b'\x01x\x02')
-        >>> sder = DictionaryElementRecord.parse(fp)
-        >>> str(sder)
-        '<x:Envelope>'
-        """
-        prefix = Utf8String.parse(fp).value
-        index = MultiByteInt31.parse(fp).value
-        return cls(prefix, index)
+    _has_prefix = True
 
 
 class PrefixElementRecord(ElementRecord):
-    def __init__(self, name):
-        super(PrefixElementRecord, self).__init__(self.char, name)
+    """Prefix a to z, from the record type.
 
-    def to_bytes(self):
-        r"""
-        >>> PrefixElementARecord('test').to_bytes()
-        b'^\x04test'
-        """
-        string = Utf8String(validate_xml_name(self.name, 'element name'))
-
-        bt = (struct.pack(b'<B', self.type) +
-              string.to_bytes())
-
-        for attr in self.attributes:
-            bt += attr.to_bytes()
-        return bytes(bt)
-
-    @classmethod
-    def parse(cls, fp):
-        r"""
-        >>> from io import BytesIO
-        >>> fp = BytesIO(b'\x04test')
-        >>> pear = PrefixElementARecord.parse(fp)
-        >>> str(pear)
-        '<a:test>'
-        """
-        name = Utf8String.parse(fp).value
-        return cls(name)
+    >>> PrefixElementARecord('test').to_bytes()
+    b'^\\x04test'
+    >>> from io import BytesIO
+    >>> str(PrefixElementARecord.parse(BytesIO(b'\\x04test')))
+    '<a:test>'
+    """
+    _has_prefix = False
 
 
 class PrefixDictionaryElementRecord(DictionaryElementRecord):
-    def __init__(self, index):
-        super(PrefixDictionaryElementRecord, self).__init__(self.char, index)
+    """Prefix a to z, from the record type.
 
-    def to_bytes(self):
-        r"""
-        >>> PrefixDictionaryElementARecord(2).to_bytes()
-        b'D\x02'
-        """
-        validate_dictionary_xml_name(self.index, 'element name')
-        string = MultiByteInt31(self.index)
-
-        bt = (struct.pack(b'<B', self.type) +
-              string.to_bytes())
-
-        for attr in self.attributes:
-            bt += attr.to_bytes()
-        return bytes(bt)
-
-    @classmethod
-    def parse(cls, fp):
-        r"""
-        >>> from io import BytesIO
-        >>> fp = BytesIO(b'\x02')
-        >>> str(PrefixDictionaryElementSRecord.parse(fp))
-        '<s:Envelope>'
-        """
-        index = MultiByteInt31.parse(fp).value
-        return cls(index)
+    >>> PrefixDictionaryElementARecord(2).to_bytes()
+    b'D\\x02'
+    >>> from io import BytesIO
+    >>> str(PrefixDictionaryElementSRecord.parse(BytesIO(b'\\x02')))
+    '<s:Envelope>'
+    """
+    _has_prefix = False
 
 
-Record.add_records((
-        ShortElementRecord,
-        ElementRecord,
-        ShortDictionaryElementRecord,
-        DictionaryElementRecord,
-    ))
-
-__module__ = sys.modules[__name__]
-__records__ = []
-
-for c in range(0x44, 0x5D + 1):
-    char = chr(c - 0x44 + ord('a'))
-    clsname = 'PrefixDictionaryElement' + char.upper() + 'Record'
-    cls = type(
-           clsname,
-           (PrefixDictionaryElementRecord,),
-           dict(
-                type=c,
-                char=char,
-            )
-           )
-    setattr(__module__, clsname, cls)
-    __records__.append(cls)
-
-for c in range(0x5E, 0x77 + 1):
-    char = chr(c - 0x5E + ord('a'))
-    clsname = 'PrefixElement' + char.upper() + 'Record'
-    cls = type(
-           clsname,
-           (PrefixElementRecord,),
-           dict(
-                type=c,
-                char=char,
-            )
-           )
-    setattr(__module__, clsname, cls)
-    __records__.append(cls)
-
-Record.add_records(__records__)
-del __records__
+Record.add_records((ShortElementRecord, ElementRecord,
+                    ShortDictionaryElementRecord, DictionaryElementRecord))
+PREFIX_DICTIONARY_ELEMENTS = letter_records(
+    PrefixDictionaryElementRecord, 0x44, 'PrefixDictionaryElement%sRecord', globals())
+PREFIX_ELEMENTS = letter_records(
+    PrefixElementRecord, 0x5E, 'PrefixElement%sRecord', globals())

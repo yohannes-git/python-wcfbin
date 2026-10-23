@@ -1,12 +1,12 @@
 # vim: set ts=4 sw=4 tw=79 fileencoding=utf-8:
 #  Copyright (c) 2011, Timo Schmid <tschmid@ernw.de>
 #  All rights reserved.
-#  
+#
 #  Redistribution and use in source and binary forms, with or without
 #  modification, are permitted provided that the following conditions
 #  are met:
 #
-#  * Redistributions of source code must retain the above copyright 
+#  * Redistributions of source code must retain the above copyright
 #    notice, this list of conditions and the following disclaimer.
 #  * Redistributions in binary form must reproduce the above copyright
 #    notice, this list of conditions and the following disclaimer in the
@@ -26,50 +26,21 @@
 #  THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 #  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 #  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+"""MC-NBFX records: the record classes, and documents to XML and bytes."""
 
+import itertools
 import sys
-import logging
 
-log = logging.getLogger(__name__)
-
+from wcf.records import attributes, base, elements, text
 from wcf.records.base import *
 from wcf.records.text import *
 from wcf.records.attributes import *
 from wcf.records.elements import *
+from wcf.records.base import qualified_name, start_tag
+from wcf.xmltext import comment, escape_text
 
-import itertools
-
-from wcf.dictionary import dictionary
-from wcf.xmltext import ncname, escape_text, escape_attribute, comment
-
-
-def _name(obj):
-    name = ncname(dictionary[obj.index] if not hasattr(obj, 'name')
-                     else obj.name)
-    if hasattr(obj, 'prefix'):
-        return '%s:%s' % (ncname(obj.prefix), name)
-    return name
-
-
-def _text(record):
-    return escape_text(str(record))
-
-
-def _attr(record):
-    if isinstance(record, (ShortXmlnsAttributeRecord,
-                           ShortDictionaryXmlnsAttributeRecord)):
-        name = 'xmlns'
-        value = dictionary[record.index] if hasattr(record, 'index') else record.value
-    elif isinstance(record, (XmlnsAttributeRecord,
-                             DictionaryXmlnsAttributeRecord)):
-        prefix = record.name if hasattr(record, 'name') else record.prefix
-        name = 'xmlns:' + ncname(prefix)
-        value = dictionary[record.index] if hasattr(record, 'index') else record.value
-    else:
-        name = _name(record)
-        value = str(record.value)
-    return ' %s="%s"' % (name, escape_attribute(value))
-
+__all__ = (base.__all__ + text.__all__ + attributes.__all__ + elements.__all__ +
+           ['render_xml', 'print_records', 'repr_records', 'dump_records'])
 
 _END = object()
 
@@ -90,23 +61,19 @@ def render_xml(records):
             if end_tag is not None:
                 parts.append(end_tag)
         elif isinstance(r, ArrayRecord):
-            name = _name(r.element)
-            attrs = ''.join(_attr(a) for a in r.element.attributes + r.attributes)
+            tag = start_tag(r.element, r.attributes)
+            end = '</%s>' % qualified_name(r.element)
             for value in r.data:
-                parts.append('<%s%s>%s</%s>' % (name, attrs, _text(value), name))
+                parts.append(tag + escape_text(str(value)) + end)
         elif isinstance(r, Element):
-            if isinstance(r, EndElementRecord):
-                raise ValueError('Unexpected EndElement in record tree')
-            name = _name(r)
-            parts.append('<%s%s>' % (
-                name, ''.join(_attr(a) for a in r.attributes)))
-            stack.append((iter(r.childs), '</%s>' % name))
+            parts.append(start_tag(r))
+            stack.append((iter(r.childs), '</%s>' % qualified_name(r)))
         elif isinstance(r, CommentRecord):
             parts.append(comment(r.comment))
-        elif isinstance(r, EndListTextRecord):
-            raise ValueError('WCF EndListText without StartListText')
+        elif isinstance(r, Text) and r.standalone:
+            parts.append(escape_text(str(r)))
         elif isinstance(r, Text):
-            parts.append(_text(r))
+            raise ValueError('WCF EndListText without StartListText')
         else:
             raise ValueError('Cannot render record %s as XML' % type(r).__name__)
     return ''.join(parts)
@@ -115,7 +82,8 @@ def render_xml(records):
 def print_records(records, skip=0, fp=None, first_call=True):
     """Print the character-equivalent XML, without pretty-print whitespace.
 
-    ``skip`` and ``first_call`` remain accepted for source compatibility.
+    ``skip`` and ``first_call`` remain accepted for source compatibility
+    (WcfPlugin.py); use render_xml().
     """
     if fp is None:
         fp = sys.stdout
@@ -124,12 +92,18 @@ def print_records(records, skip=0, fp=None, first_call=True):
 
 
 def repr_records(records, skip=0):
-    if records is None:
-        return
-    for r in records:
-        print(' ' * skip + str(r))
-        if hasattr(r, 'childs'):
-            repr_records(r.childs, skip + 1)
+    """Print the records of a tree, one per line, indented by depth
+    (a debugging aid)."""
+    stack = [(iter(records or ()), skip)]
+    while stack:
+        siblings, depth = stack[-1]
+        r = next(siblings, _END)
+        if r is _END:
+            stack.pop()
+            continue
+        print(' ' * depth + str(r))
+        if isinstance(r, Element):
+            stack.append((iter(r.childs), depth + 1))
 
 
 def dump_records(records):
@@ -149,13 +123,12 @@ def dump_records(records):
             stack.pop()
             if closing is not None:
                 out.extend(closing)
-        elif isinstance(record, Element) and not isinstance(record, EndElementRecord):
+        elif isinstance(record, Element):
             out.extend(record.to_bytes())
-            children = getattr(record, 'childs', [])
-            implicit = (bool(children) and isinstance(children[-1], Text) and
-                        children[-1].type not in (0xA4, 0xA6) and
-                        getattr(record, '_wcf_closure', None) != 'explicit')
-            if implicit:
+            children = record.childs
+            if (children and isinstance(children[-1], Text) and
+                    children[-1].with_end_element and
+                    record._wcf_closure != 'explicit'):
                 # the last text record becomes its *WithEndElement form
                 value = children[-1].to_bytes()
                 stack.append((itertools.islice(children, len(children) - 1),

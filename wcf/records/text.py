@@ -28,16 +28,39 @@
 #  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
-import struct
+"""Text records (MC-NBFX 2.2.3)."""
+
 import base64
 import datetime
 import decimal
-import logging
 import math
+import struct
 import uuid
 
+from wcf.datatypes import Decimal, MultiByteInt31, read_exact, read_struct
+from wcf.dictionary import dictionary
+from wcf.records.base import Record, Text, charge
 
-log = logging.getLogger(__name__)
+__all__ = ['ZeroTextRecord', 'OneTextRecord', 'FalseTextRecord',
+           'TrueTextRecord', 'Int8TextRecord', 'Int16TextRecord',
+           'Int32TextRecord', 'Int64TextRecord', 'UInt64TextRecord',
+           'BoolTextRecord', 'UnicodeChars8TextRecord',
+           'UnicodeChars16TextRecord', 'UnicodeChars32TextRecord',
+           'QNameDictionaryTextRecord', 'FloatTextRecord', 'DoubleTextRecord',
+           'DecimalTextRecord', 'DatetimeTextRecord', 'Chars8TextRecord',
+           'Chars16TextRecord', 'Chars32TextRecord', 'UniqueIdTextRecord',
+           'UuidTextRecord', 'Bytes8TextRecord', 'Bytes16TextRecord',
+           'Bytes32TextRecord', 'StartListTextRecord', 'EndListTextRecord',
+           'EmptyTextRecord', 'TimeSpanTextRecord', 'DictionaryTextRecord']
+
+TICKS_PER_SECOND = 10000000          # 100 ns
+TICKS_PER_DAY = 86400 * TICKS_PER_SECOND
+MAX_DATETIME_TICKS = 3155378976000000000  # 10000-01-01T00:00:00
+
+
+def _fraction(ticks):
+    """The ".fffffff" fraction of a second, without trailing zeros."""
+    return '.' + ('%07d' % ticks).rstrip('0') if ticks else ''
 
 
 def _shortest_ieee754_text(value, single_precision):
@@ -88,9 +111,6 @@ def _shortest_ieee754_text(value, single_precision):
         mantissa += '.' + figures[1:]
     return ('-' if negative else '') + mantissa + 'E%+d' % (decimal_position - 1)
 
-from wcf.datatypes import *
-from wcf.records.base import *
-from wcf.dictionary import dictionary
 
 
 class _FixedSizeText(Text):
@@ -190,87 +210,71 @@ class _LengthPrefixedText(Text):
         return cls(cls._decode(read_exact(fp, length)))
 
 
-class ZeroTextRecord(Text):
+class _ConstantText(Text):
+    """A text record without fields that stands for fixed characters."""
+    text = None
+
+    def __str__(self):
+        return self.text
+
+
+class ZeroTextRecord(_ConstantText):
     type = 0x80
-    max_chars = 1  # longest rendering
-
-    def __str__(self):
-        return '0'
-
-    @classmethod
-    def parse(cls, fp):
-        return cls()
+    text = '0'
+    max_chars = 1
 
 
-class OneTextRecord(Text):
+class OneTextRecord(_ConstantText):
     type = 0x82
-    max_chars = 1  # longest rendering
-
-    def __str__(self):
-        return '1'
-
-    @classmethod
-    def parse(cls, fp):
-        return cls()
+    text = '1'
+    max_chars = 1
 
 
-class FalseTextRecord(Text):
+class FalseTextRecord(_ConstantText):
     type = 0x84
-    max_chars = 5  # longest rendering
-
-    def __str__(self):
-        return 'false'
-
-    @classmethod
-    def parse(cls, fp):
-        return cls()
+    text = 'false'
+    max_chars = 5
 
 
-class TrueTextRecord(Text):
+class TrueTextRecord(_ConstantText):
     type = 0x86
-    max_chars = 4  # longest rendering
-
-    def __str__(self):
-        return 'true'
-
-    @classmethod
-    def parse(cls, fp):
-        return cls()
+    text = 'true'
+    max_chars = 4
 
 
 class Int8TextRecord(_FixedSizeText):
     type = 0x88
-    max_chars = 4  # longest rendering
+    max_chars = 4
     _format = '<b'
 
 
-class Int16TextRecord(Int8TextRecord):
+class Int16TextRecord(_FixedSizeText):
     type = 0x8A
-    max_chars = 6  # longest rendering
+    max_chars = 6
     _format = '<h'
 
 
-class Int32TextRecord(Int8TextRecord):
+class Int32TextRecord(_FixedSizeText):
     type = 0x8C
-    max_chars = 11  # longest rendering
+    max_chars = 11
     _format = '<i'
 
 
-class Int64TextRecord(Int8TextRecord):
+class Int64TextRecord(_FixedSizeText):
     type = 0x8E
-    max_chars = 20  # longest rendering
+    max_chars = 20
     _format = '<q'
 
 
-class UInt64TextRecord(Int64TextRecord):
+class UInt64TextRecord(_FixedSizeText):
     type = 0xB2
-    max_chars = 20  # longest rendering
+    max_chars = 20
     _format = '<Q'
 
 
 class BoolTextRecord(Text):
     type = 0xB4
-    max_chars = 5  # longest rendering
+    max_chars = 5
 
     def __init__(self, value):
         self.value = value
@@ -306,7 +310,34 @@ class BoolTextRecord(Text):
         return cls(bool(byte))
 
 
-class UnicodeChars8TextRecord(_LengthPrefixedText):
+class _Utf8Text(_LengthPrefixedText):
+    """UTF-8 text (MC-NBFX 2.2.3.13 to 2.2.3.15).
+
+    >>> Chars8TextRecord('abc').to_bytes()
+    b'\\x98\\x03abc'
+    >>> Chars16TextRecord('abc').to_bytes()
+    b'\\x9a\\x03\\x00abc'
+    >>> Chars32TextRecord('abc').to_bytes()
+    b'\\x9c\\x03\\x00\\x00\\x00abc'
+    >>> from io import BytesIO
+    >>> str(Chars16TextRecord.parse(BytesIO(b'\\x04\\x00test')))
+    'test'
+
+    str() is the characters, unescaped like every other text record (the
+    XML escaping is done by render_xml()):
+
+    >>> str(Chars8TextRecord('a<b>&'))
+    'a<b>&'
+    """
+
+    def __init__(self, value):
+        if not isinstance(value, str):
+            raise TypeError('%s value must be str, not %s'
+                            % (type(self).__name__, type(value).__name__))
+        super().__init__(value)
+
+
+class _Utf16Text(_Utf8Text):
     """UTF-16LE text (MC-NBFX 2.2.3.27 to 2.2.3.29).
 
     >>> UnicodeChars8TextRecord('abc').to_bytes()
@@ -317,13 +348,6 @@ class UnicodeChars8TextRecord(_LengthPrefixedText):
     >>> str(UnicodeChars32TextRecord.parse(BytesIO(b'\\x04\\x00\\x00\\x003\\x002\\x00')))
     '32'
     """
-    type = 0xB6
-
-    def __init__(self, value):
-        if not isinstance(value, str):
-            raise TypeError('%s value must be str, not %s'
-                            % (type(self).__name__, type(value).__name__))
-        super().__init__(value)
 
     def _encode(self):
         return self.value.encode('utf-16le')
@@ -335,12 +359,16 @@ class UnicodeChars8TextRecord(_LengthPrefixedText):
         return data.decode('utf-16le')
 
 
-class UnicodeChars16TextRecord(UnicodeChars8TextRecord):
+class UnicodeChars8TextRecord(_Utf16Text):
+    type = 0xB6
+
+
+class UnicodeChars16TextRecord(_Utf16Text):
     type = 0xB8
     _length_format = '<H'
 
 
-class UnicodeChars32TextRecord(UnicodeChars8TextRecord):
+class UnicodeChars32TextRecord(_Utf16Text):
     """MC-NBFX 2.2.3.29 describes the Length as a MultiByteInt31, but the
     example of section 3 ("BA 04 00 00 00 33 00 32 00" for "32") and the
     .NET XmlBinaryReader (ReadUInt31(), a non-negative Int32) use a
@@ -389,12 +417,13 @@ class QNameDictionaryTextRecord(Text):
             raise ValueError('Invalid QNameDictionaryText prefix index')
         prefix = chr(prefix_index + ord('a'))
         index = MultiByteInt31.parse(fp).value
+        dictionary[index]  # an id unknown when decoding is refused
         return cls(prefix, index)
 
 
 class FloatTextRecord(_FixedSizeText):
     type = 0x90
-    max_chars = 15  # longest rendering
+    max_chars = 15
     _format = '<f'
 
     def __str__(self):
@@ -411,9 +440,9 @@ class FloatTextRecord(_FixedSizeText):
         return _shortest_ieee754_text(self.value, single_precision=True)
 
 
-class DoubleTextRecord(FloatTextRecord):
+class DoubleTextRecord(_FixedSizeText):
     type = 0x92
-    max_chars = 24  # longest rendering
+    max_chars = 24
     _format = '<d'
 
     def __str__(self):
@@ -428,7 +457,7 @@ class DoubleTextRecord(FloatTextRecord):
 
 class DecimalTextRecord(Text):
     type = 0x94
-    max_chars = 31  # longest rendering
+    max_chars = 31
 
     def __init__(self, value):
         self.value = value
@@ -461,12 +490,25 @@ class DecimalTextRecord(Text):
 
 
 class DatetimeTextRecord(Text):
+    """``value``: 100 ns ticks since 0001-01-01, ``tz``: 0 unspecified,
+    1 UTC, 2 local (MC-NBFX 2.2.3.12).
+
+    A local time is taken as the text of 2.2.3.12 describes it: the ticks
+    are the local time and the offset of the decoding host is appended.
+    .NET (DateTime.ToBinary()) stores the UTC ticks of a local time
+    instead; no example of the specification covers that case.
+    """
     type = 0x96
-    max_chars = 33  # longest rendering
+    max_chars = 33
 
     def __init__(self, value, tz):
         self.value = value
         self.tz = tz
+
+    def _check(self):
+        if self.tz not in (0, 1, 2) or not 0 <= self.value < MAX_DATETIME_TICKS:
+            raise ValueError('Invalid MC-NBFX DateTimeText value %r or time zone %r'
+                             % (self.value, self.tz))
 
     def __str__(self):
         """DateTimeText lexical format (MC-NBFX 2.2.3.12).
@@ -476,18 +518,14 @@ class DatetimeTextRecord(Text):
         ("2006-05-17T00:00:00") and .NET (XmlConverter.ToChars(DateTime))
         do not.
         """
-        if not 0 <= self.value < 3155378976000000000:
-            raise ValueError('DateTime ticks outside Microsoft MC-NBFX range')
-        if self.tz not in (0, 1, 2):
-            raise ValueError('Invalid MC-NBFX timezone kind %s' % self.tz)
-        days, rem = divmod(self.value, 864000000000)
-        seconds, ticks = divmod(rem, 10000000)
+        self._check()
+        days, rem = divmod(self.value, TICKS_PER_DAY)
+        seconds, ticks = divmod(rem, TICKS_PER_SECOND)
         dt = (datetime.datetime(1, 1, 1) +
               datetime.timedelta(days=days, seconds=seconds))
         text = '%04d-%02d-%02dT%02d:%02d:%02d' % (
             dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second)
-        if ticks:
-            text += '.' + ('%07d' % ticks).rstrip('0')
+        text += _fraction(ticks)
         if self.tz == 1:
             text += 'Z'
         elif self.tz == 2:
@@ -500,7 +538,7 @@ class DatetimeTextRecord(Text):
                 offset = dt.astimezone().utcoffset()
             except (OverflowError, OSError, ValueError):
                 offset = datetime.datetime.now().astimezone().utcoffset()
-            offset_minutes = int(offset.total_seconds() / 60)
+            offset_minutes = offset // datetime.timedelta(minutes=1)
             absolute = abs(offset_minutes)
             text += '%s%02d:%02d' % ('+' if offset_minutes >= 0 else '-',
                                     absolute // 60, absolute % 60)
@@ -513,14 +551,8 @@ class DatetimeTextRecord(Text):
         >>> str(''.join('%02X' % i for i in DatetimeTextRecord(632834208000000000, 2).to_bytes()))
         '9600408EF95B47C888'
         """
-        if self.tz not in (0, 1, 2) or not 0 <= self.value < 3155378976000000000:
-            raise ValueError('Invalid MC-NBFX DateTimeText value or timezone')
-        bt = super(DatetimeTextRecord, self).to_bytes()
-        bt += struct.pack(
-            '<Q',
-            ((self.tz & 3) << 62) | (self.value & 0x3FFFFFFFFFFFFFFF))
-
-        return bytes(bt)
+        self._check()
+        return bytes((self.type,)) + struct.pack('<Q', (self.tz << 62) | self.value)
 
     @classmethod
     def parse(cls, fp):
@@ -534,48 +566,21 @@ class DatetimeTextRecord(Text):
         '2006-05-17T00:00:00'
         """
         data = read_struct(fp, '<Q')
-        tz = data >> 62
-        value = data & 0x3FFFFFFFFFFFFFFF
-
-        if tz not in (0, 1, 2) or value >= 3155378976000000000:
-            raise ValueError('Invalid MC-NBFX DateTimeText bits')
-        return cls(value, tz)
+        record = cls(data & 0x3FFFFFFFFFFFFFFF, data >> 62)
+        record._check()
+        return record
 
 
-class Chars8TextRecord(_LengthPrefixedText):
-    """UTF-8 text (MC-NBFX 2.2.3.13 to 2.2.3.15).
-
-    >>> Chars8TextRecord('abc').to_bytes()
-    b'\\x98\\x03abc'
-    >>> Chars16TextRecord('abc').to_bytes()
-    b'\\x9a\\x03\\x00abc'
-    >>> Chars32TextRecord('abc').to_bytes()
-    b'\\x9c\\x03\\x00\\x00\\x00abc'
-    >>> from io import BytesIO
-    >>> str(Chars16TextRecord.parse(BytesIO(b'\\x04\\x00test')))
-    'test'
-
-    str() is the characters, unescaped like every other text record (the
-    XML escaping is done by render_xml()):
-
-    >>> str(Chars8TextRecord('a<b>&'))
-    'a<b>&'
-    """
+class Chars8TextRecord(_Utf8Text):
     type = 0x98
 
-    def __init__(self, value):
-        if not isinstance(value, str):
-            raise TypeError('%s value must be str, not %s'
-                            % (type(self).__name__, type(value).__name__))
-        super().__init__(value)
 
-
-class Chars16TextRecord(Chars8TextRecord):
+class Chars16TextRecord(_Utf8Text):
     type = 0x9A
     _length_format = '<H'
 
 
-class Chars32TextRecord(Chars8TextRecord):
+class Chars32TextRecord(_Utf8Text):
     type = 0x9C
     _length_format = '<i'
     _positive = True
@@ -583,7 +588,7 @@ class Chars32TextRecord(Chars8TextRecord):
 
 class UniqueIdTextRecord(Text):
     type = 0xAC
-    max_chars = 45  # longest rendering
+    max_chars = 45
 
     def __init__(self, *args, **kwargs):
         self.uuid = uuid.UUID(*args, **kwargs)
@@ -620,7 +625,7 @@ class UniqueIdTextRecord(Text):
 
 class UuidTextRecord(UniqueIdTextRecord):
     type = 0xB0
-    max_chars = 36  # longest rendering
+    max_chars = 36
 
     def __str__(self):
         """
@@ -630,7 +635,7 @@ class UuidTextRecord(UniqueIdTextRecord):
         return str(self.uuid)
 
 
-class Bytes8TextRecord(_LengthPrefixedText):
+class _BytesText(_LengthPrefixedText):
     """Binary data, rendered as base64 (MC-NBFX 2.2.3.16 to 2.2.3.18).
 
     >>> Bytes8TextRecord(b'abc').to_bytes()
@@ -640,7 +645,6 @@ class Bytes8TextRecord(_LengthPrefixedText):
     >>> str(Bytes16TextRecord(b'abc'))
     'YWJj'
     """
-    type = 0x9E
 
     def __init__(self, value):
         if not isinstance(value, (bytes, bytearray, memoryview)):
@@ -651,6 +655,9 @@ class Bytes8TextRecord(_LengthPrefixedText):
     def __str__(self):
         return base64.b64encode(self.value).decode()
 
+    def char_count(self):
+        return 4 * ((len(self.value) + 2) // 3)  # base64, without encoding it
+
     def _encode(self):
         return bytes(self.value)
 
@@ -659,12 +666,16 @@ class Bytes8TextRecord(_LengthPrefixedText):
         return data
 
 
-class Bytes16TextRecord(Bytes8TextRecord):
+class Bytes8TextRecord(_BytesText):
+    type = 0x9E
+
+
+class Bytes16TextRecord(_BytesText):
     type = 0xA0
     _length_format = '<H'
 
 
-class Bytes32TextRecord(Bytes8TextRecord):
+class Bytes32TextRecord(_BytesText):
     type = 0xA2
     _length_format = '<i'
     _positive = True
@@ -672,6 +683,7 @@ class Bytes32TextRecord(Bytes8TextRecord):
 
 class StartListTextRecord(Text):
     type = 0xA4
+    with_end_element = False  # 0xA5 is reserved
 
     def __init__(self, values=None):
         self.values = list(values) if values is not None else []
@@ -679,10 +691,14 @@ class StartListTextRecord(Text):
     def __str__(self):
         return ' '.join(str(value) for value in self.values)
 
+    def char_count(self):
+        return 0  # the items are charged as they are read
+
     def to_bytes(self):
         result = bytearray((self.type,))
         for value in self.values:
-            if not isinstance(value, Text) or isinstance(value, (StartListTextRecord, EndListTextRecord)):
+            if (not isinstance(value, Text) or not value.standalone or
+                    isinstance(value, StartListTextRecord)):
                 raise ValueError('WCF text list must contain non-list text records')
             result.extend(value.to_bytes())
         result.append(EndListTextRecord.type)
@@ -699,22 +715,26 @@ class StartListTextRecord(Text):
             if code == EndListTextRecord.type:
                 break
             item_cls = Record.records.get(code)
-            if item_cls is None or not issubclass(item_cls, Text) or code in (cls.type, EndListTextRecord.type):
+            if (item_cls is None or not issubclass(item_cls, Text) or
+                    not item_cls.standalone or issubclass(item_cls, cls)):
                 raise ValueError('Invalid record 0x%02X inside a WCF text list' % code)
             item = item_cls.parse(fp)
-            charge(1, text_chars(item) + 1)  # and its separator
+            charge(1, item.char_count() + 1)  # and its separator
             values.append(item)
         return cls(values)
 
 
 class EndListTextRecord(Text):
+    """Only valid closing a StartListText."""
     type = 0xA6
-    max_chars = 0  # longest rendering
+    max_chars = 0
+    standalone = False
+    with_end_element = False  # 0xA7 is reserved
 
 
 class EmptyTextRecord(Text):
     type = 0xA8
-    max_chars = 0  # longest rendering
+    max_chars = 0
 
     def __str__(self):
         return ''
@@ -722,7 +742,7 @@ class EmptyTextRecord(Text):
 
 class TimeSpanTextRecord(_FixedSizeText):
     type = 0xAE
-    max_chars = 27  # longest rendering
+    max_chars = 27
     _format = '<q'
 
     def __str__(self):
@@ -744,7 +764,7 @@ class TimeSpanTextRecord(_FixedSizeText):
         b'\\xae\\x00Q%\\x02\\x00\\x00\\x00\\x00'
         """
         ticks = abs(self.value)
-        seconds, fraction = divmod(ticks, 10000000)
+        seconds, fraction = divmod(ticks, TICKS_PER_SECOND)
         days, seconds = divmod(seconds, 86400)
         hours, seconds = divmod(seconds, 3600)
         minutes, seconds = divmod(seconds, 60)
@@ -758,10 +778,7 @@ class TimeSpanTextRecord(_FixedSizeText):
             if minutes:
                 text += '%dM' % minutes
             if seconds or fraction:
-                text += '%d' % seconds
-                if fraction:
-                    text += '.' + ('%07d' % fraction).rstrip('0')
-                text += 'S'
+                text += '%d%sS' % (seconds, _fraction(fraction))
         if text.endswith('P'):
             text += 'T0S'
         return text
@@ -798,7 +815,9 @@ class DictionaryTextRecord(Text):
         'Envelope'
         """
         index = MultiByteInt31.parse(fp).value
+        dictionary[index]  # an id unknown when decoding is refused
         return cls(index)
+
 
 Record.add_records((ZeroTextRecord,
                     OneTextRecord,

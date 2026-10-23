@@ -7,14 +7,13 @@ type overrides are keyed by an XML namespace-aware path.
 
 
 import base64
-import io
 import re
 from xml.parsers import expat
 
 from wcf.dictionary import inverted_dict
 from wcf.xmltext import ncname
 from wcf.records import (
-    Record, ShortElementRecord, ElementRecord, ShortDictionaryElementRecord,
+    ShortElementRecord, ElementRecord, ShortDictionaryElementRecord,
     DictionaryElementRecord, ShortAttributeRecord, AttributeRecord,
     ShortDictionaryAttributeRecord, DictionaryAttributeRecord,
     ShortXmlnsAttributeRecord, XmlnsAttributeRecord,
@@ -28,7 +27,33 @@ from wcf.records import (
     dump_records,
 )
 from wcf.datatypes import Decimal
-from wcf.records import elements, attributes
+from wcf.records.attributes import PREFIX_ATTRIBUTES, PREFIX_DICTIONARY_ATTRIBUTES
+from wcf.records.elements import PREFIX_ELEMENTS, PREFIX_DICTIONARY_ELEMENTS
+
+# the record families of a name, by (prefix kind, dictionary name):
+# (no prefix, string prefix, letter prefix) x (String, DictionaryString)
+_ELEMENT_RECORDS = ((ShortElementRecord, ShortDictionaryElementRecord),
+                    (ElementRecord, DictionaryElementRecord),
+                    (PREFIX_ELEMENTS, PREFIX_DICTIONARY_ELEMENTS))
+_ATTRIBUTE_RECORDS = ((ShortAttributeRecord, ShortDictionaryAttributeRecord),
+                      (AttributeRecord, DictionaryAttributeRecord),
+                      (PREFIX_ATTRIBUTES, PREFIX_DICTIONARY_ATTRIBUTES))
+
+
+def _named_record(qname, families, *value):
+    """The most compact element or attribute record for an XML qualified
+    name: a dictionary name when the active dictionaries have it, the
+    single letter prefix records for a prefix a to z."""
+    prefix, _, name = qname.rpartition(':')
+    ncname(name)
+    index = inverted_dict.get(name)
+    by_index = index is not None
+    if not prefix:
+        return families[0][by_index](index if by_index else name, *value)
+    ncname(prefix)
+    if len(prefix) == 1 and 'a' <= prefix <= 'z':
+        return families[2][by_index][prefix](index if by_index else name, *value)
+    return families[1][by_index](prefix, index if by_index else name, *value)
 
 
 _INT_TYPES = {
@@ -172,51 +197,19 @@ class XMLParser(object):
             self._stack[-1].childs.append(record)
 
     def _parse_tag(self, tag):
-        if ':' in tag:
-            prefix, name = tag.split(':', 1)
-            ncname(prefix)
-            ncname(name)
-            if len(prefix) == 1 and 'a' <= prefix <= 'z':
-                if name in inverted_dict:
-                    cls = getattr(elements, 'PrefixDictionaryElement%sRecord' % prefix.upper())
-                    return cls(inverted_dict[name])
-                cls = getattr(elements, 'PrefixElement%sRecord' % prefix.upper())
-                return cls(name)
-            if name in inverted_dict:
-                return DictionaryElementRecord(prefix, inverted_dict[name])
-            return ElementRecord(prefix, name)
-        if ncname(tag) in inverted_dict:
-            return ShortDictionaryElementRecord(inverted_dict[tag])
-        return ShortElementRecord(tag)
+        return _named_record(tag, _ELEMENT_RECORDS)
 
     def _parse_attr(self, name, value, ns):
-        if name == 'xmlns':
-            if value in inverted_dict:
-                return ShortDictionaryXmlnsAttributeRecord(inverted_dict[value])
-            return ShortXmlnsAttributeRecord(value)
-        if name.startswith('xmlns:'):
-            prefix = ncname(name[6:])
-            if value in inverted_dict:
-                return DictionaryXmlnsAttributeRecord(prefix, inverted_dict[value])
-            return XmlnsAttributeRecord(prefix, value)
-
+        if name == 'xmlns' or name.startswith('xmlns:'):
+            prefix = ncname(name[6:]) if name != 'xmlns' else None
+            index = inverted_dict.get(value)
+            if index is not None:
+                return (ShortDictionaryXmlnsAttributeRecord(index) if prefix is None
+                        else DictionaryXmlnsAttributeRecord(prefix, index))
+            return (ShortXmlnsAttributeRecord(value) if prefix is None
+                    else XmlnsAttributeRecord(prefix, value))
         record = self._value_record(value, self._path + ['@' + _as_qname(name, ns, True)])
-        if ':' in name:
-            prefix, local = name.split(':', 1)
-            ncname(prefix)
-            ncname(local)
-            if len(prefix) == 1 and 'a' <= prefix <= 'z':
-                if local in inverted_dict:
-                    cls = getattr(attributes, 'PrefixDictionaryAttribute%sRecord' % prefix.upper())
-                    return cls(inverted_dict[local], record)
-                cls = getattr(attributes, 'PrefixAttribute%sRecord' % prefix.upper())
-                return cls(local, record)
-            if local in inverted_dict:
-                return DictionaryAttributeRecord(prefix, inverted_dict[local], record)
-            return AttributeRecord(prefix, local, record)
-        if ncname(name) in inverted_dict:
-            return ShortDictionaryAttributeRecord(inverted_dict[name], record)
-        return ShortAttributeRecord(name, record)
+        return _named_record(name, _ATTRIBUTE_RECORDS, record)
 
     def _on_start(self, tag, attrs):
         if self._stack:

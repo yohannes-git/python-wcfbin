@@ -1,7 +1,7 @@
 # vim: set ts=4 sw=4 tw=79 fileencoding=utf-8:
 #  Copyright (c) 2011, Timo Schmid <tschmid@ernw.de>
 #  All rights reserved.
-# 
+#
 #  Redistribution and use in source and binary forms, with or without
 #  modification, are permitted provided that the following conditions
 #  are met:
@@ -26,416 +26,209 @@
 #  THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 #  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 #  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+"""Attribute records (MC-NBFX 2.2.2)."""
 
-
-import struct
-import logging
-import sys
-
-log = logging.getLogger(__name__)
-
-from wcf.datatypes import *
-from wcf.records.base import *
-from wcf.records.text import *
+from wcf.datatypes import MultiByteInt31, Utf8String
 from wcf.dictionary import dictionary
+from wcf.records.base import (Attribute, Record, _DictionaryName, _NamedRecord,
+                              letter_records, read_attribute_text,
+                              validate_attribute_text, validate_xml_name)
+
+__all__ = ['ShortAttributeRecord', 'AttributeRecord',
+           'ShortDictionaryAttributeRecord', 'DictionaryAttributeRecord',
+           'PrefixAttributeRecord', 'PrefixDictionaryAttributeRecord',
+           'ShortXmlnsAttributeRecord', 'XmlnsAttributeRecord',
+           'ShortDictionaryXmlnsAttributeRecord',
+           'DictionaryXmlnsAttributeRecord', 'PREFIX_ATTRIBUTES',
+           'PREFIX_DICTIONARY_ATTRIBUTES']
 
 
-class ShortAttributeRecord(Attribute):
+class _AttributeRecord(_NamedRecord, Attribute):
+    """An attribute: its names (see _NamedRecord) then its value, a text
+    record."""
+    _what = 'attribute'
+
+    def __init__(self, *args):
+        self._set_names(args[:-1])
+        self.value = validate_attribute_text(args[-1]) if args else None
+
+    def to_bytes(self):
+        return bytes(self._head() + validate_attribute_text(self.value).to_bytes())
+
+    @classmethod
+    def parse(cls, fp):
+        names = cls._read_names(fp)
+        return cls(*names, read_attribute_text(fp))
+
+
+class ShortAttributeRecord(_AttributeRecord):
+    """
+    >>> from wcf.records import TrueTextRecord
+    >>> ShortAttributeRecord('test', TrueTextRecord()).to_bytes()
+    b'\\x04\\x04test\\x86'
+    >>> from io import BytesIO
+    >>> ShortAttributeRecord.parse(BytesIO(b'\\x04test\\x86')).value
+    <TrueTextRecord(type=0x86)>
+    """
     type = 0x04
 
-    def __init__(self, name, value):
-        self.name = validate_xml_name(name, 'attribute name')
-        self.value = validate_attribute_text(value)
 
-    def to_bytes(self):
-        """
-        >>> ShortAttributeRecord('test', TrueTextRecord()).to_bytes()
-        b'\\x04\\x04test\\x86'
-        """
-        bt = super(ShortAttributeRecord, self).to_bytes()
-        bt += Utf8String(validate_xml_name(self.name, 'attribute name')).to_bytes()
-        bt += validate_attribute_text(self.value).to_bytes()
-
-        return bytes(bt)
-
-    def __str__(self):
-        return '%s="%s"' % (self.name, str(self.value))
-
-    @classmethod
-    def parse(cls, fp):
-        """
-        >>> from io import BytesIO
-        >>> fp = BytesIO(b'\\x04test\\x86')
-        >>> sar = ShortAttributeRecord.parse(fp)
-        >>> str(sar.name)
-        'test'
-        >>> sar.value
-        <TrueTextRecord(type=0x86)>
-        """
-        name = Utf8String.parse(fp).value
-        return cls(name, read_attribute_text(fp))
-
-
-class AttributeRecord(Attribute):
+class AttributeRecord(ShortAttributeRecord):
+    """
+    >>> from wcf.records import TrueTextRecord
+    >>> AttributeRecord('x', 'test', TrueTextRecord()).to_bytes()
+    b'\\x05\\x01x\\x04test\\x86'
+    """
     type = 0x05
-
-    def __init__(self, prefix, name, value):
-        self.prefix = validate_xml_name(prefix, 'attribute prefix')
-        self.name = validate_xml_name(name, 'attribute name')
-        self.value = validate_attribute_text(value)
-
-    def to_bytes(self):
-        """
-        >>> AttributeRecord('x', 'test', TrueTextRecord()).to_bytes()
-        b'\\x05\\x01x\\x04test\\x86'
-        """
-        bt = super(AttributeRecord, self).to_bytes()
-        bt += Utf8String(validate_xml_name(self.prefix, 'attribute prefix')).to_bytes()
-        bt += Utf8String(validate_xml_name(self.name, 'attribute name')).to_bytes()
-        bt += validate_attribute_text(self.value).to_bytes()
-
-        return bytes(bt)
-
-    def __str__(self):
-        return '%s:%s="%s"' % (self.prefix, self.name, str(self.value))
-
-    @classmethod
-    def parse(cls, fp):
-        """
-        >>> from io import BytesIO
-        >>> fp = BytesIO(b'\\x01x\\x04test\\x86')
-        >>> ar = AttributeRecord.parse(fp)
-        >>> str(ar.prefix)
-        'x'
-        >>> str(ar.name)
-        'test'
-        >>> ar.value
-        <TrueTextRecord(type=0x86)>
-        """
-        prefix = Utf8String.parse(fp).value
-        name = Utf8String.parse(fp).value
-        return cls(prefix, name, read_attribute_text(fp))
+    _has_prefix = True
 
 
-class ShortDictionaryAttributeRecord(Attribute):
+class ShortDictionaryAttributeRecord(_DictionaryName, _AttributeRecord):
+    """
+    >>> from wcf.records import TrueTextRecord
+    >>> ShortDictionaryAttributeRecord(2, TrueTextRecord()).to_bytes()
+    b'\\x06\\x02\\x86'
+    >>> from io import BytesIO
+    >>> str(ShortDictionaryAttributeRecord.parse(BytesIO(b'\\x0c\\x86')))
+    'To="true"'
+    """
     type = 0x06
-
-    def __init__(self, index, value):
-        self.index = index
-        self.value = validate_attribute_text(value)
-
-    def to_bytes(self):
-        """
-        >>> ShortDictionaryAttributeRecord(2, TrueTextRecord()).to_bytes()
-        b'\\x06\\x02\\x86'
-        """
-        bt = super(ShortDictionaryAttributeRecord, self).to_bytes()
-        validate_dictionary_xml_name(self.index, 'attribute name')
-        bt += MultiByteInt31(self.index).to_bytes()
-        bt += validate_attribute_text(self.value).to_bytes()
-
-        return bytes(bt)
-
-    def __str__(self):
-        return '%s="%s"' % (dictionary[self.index], str(self.value))
-
-    @classmethod
-    def parse(cls, fp):
-        """
-        >>> from io import BytesIO
-        >>> fp = BytesIO(b'\\x0c\\x86')
-        >>> sdar = ShortDictionaryAttributeRecord.parse(fp)
-        >>> sdar.index
-        12
-        >>> sdar.value
-        <TrueTextRecord(type=0x86)>
-        >>> str(sdar)
-        'To="true"'
-        """
-        index = MultiByteInt31.parse(fp).value
-        validate_dictionary_xml_name(index, 'attribute name')
-        return cls(index, read_attribute_text(fp))
+    _by_index = True
 
 
-class DictionaryAttributeRecord(Attribute):
+class DictionaryAttributeRecord(ShortDictionaryAttributeRecord):
+    """
+    >>> from wcf.records import TrueTextRecord
+    >>> DictionaryAttributeRecord('x', 2, TrueTextRecord()).to_bytes()
+    b'\\x07\\x01x\\x02\\x86'
+    """
     type = 0x07
-
-    def __init__(self, prefix, index, value):
-        self.prefix = validate_xml_name(prefix, 'attribute prefix')
-        self.index = index
-        self.value = validate_attribute_text(value)
-
-    def to_bytes(self):
-        """
-        >>> DictionaryAttributeRecord('x', 2, TrueTextRecord()).to_bytes()
-        b'\\x07\\x01x\\x02\\x86'
-        """
-        bt = super(DictionaryAttributeRecord, self).to_bytes()
-        bt += Utf8String(validate_xml_name(self.prefix, 'attribute prefix')).to_bytes()
-        validate_dictionary_xml_name(self.index, 'attribute name')
-        bt += MultiByteInt31(self.index).to_bytes()
-        bt += validate_attribute_text(self.value).to_bytes()
-
-        return bytes(bt)
-
-    def __str__(self):
-        return '%s:%s="%s"' % (self.prefix, dictionary[self.index],
-                str(self.value))
-
-    @classmethod
-    def parse(cls, fp):
-        """
-        >>> from io import BytesIO
-        >>> fp = BytesIO(b'\\x01x\\x02\\x86')
-        >>> dar = DictionaryAttributeRecord.parse(fp)
-        >>> str(dar.prefix)
-        'x'
-        >>> dar.index
-        2
-        >>> str(dar.value)
-        'true'
-        """
-        prefix = Utf8String.parse(fp).value
-        index = MultiByteInt31.parse(fp).value
-        validate_dictionary_xml_name(index, 'attribute name')
-        return cls(prefix, index, read_attribute_text(fp))
-
-
-class ShortDictionaryXmlnsAttributeRecord(Attribute):
-    type = 0x0A
-
-    def __init__(self, index):
-        self.index = index
-
-    def __str__(self):
-        return 'xmlns="%s"' % (dictionary[self.index],)
-
-    def to_bytes(self):
-        """
-        >>> ShortDictionaryXmlnsAttributeRecord(6).to_bytes()
-        b'\\n\\x06'
-        """
-        dictionary[self.index]  # never write an id unknown to the peer
-        bt = struct.pack(b'<B', self.type)
-        bt += MultiByteInt31(self.index).to_bytes()
-
-        return bytes(bt)
-
-    @classmethod
-    def parse(cls, fp):
-        """
-        >>> from io import BytesIO
-        >>> fp = BytesIO(b'\\x06')
-        >>> sdxar = ShortDictionaryXmlnsAttributeRecord.parse(fp)
-        >>> sdxar.index
-        6
-        >>> str(sdxar)
-        'xmlns="http://www.w3.org/2005/08/addressing"'
-        """
-        index = MultiByteInt31.parse(fp).value
-        return cls(index)
-
-
-class DictionaryXmlnsAttributeRecord(Attribute):
-    type = 0x0B
-
-    def __init__(self, prefix, index):
-        self.prefix = validate_xml_name(prefix, 'xmlns prefix')
-        self.index = index
-
-    def __str__(self):
-        return 'xmlns:%s="%s"' % (self.prefix, dictionary[self.index])
-
-    def to_bytes(self):
-        """
-        >>> DictionaryXmlnsAttributeRecord('a', 6).to_bytes()
-        b'\\x0b\\x01\x61\\x06'
-        """
-        dictionary[self.index]  # never write an id unknown to the peer
-        bt = struct.pack(b'<B', self.type)
-        bt += Utf8String(validate_xml_name(self.prefix, 'xmlns prefix')).to_bytes()
-        bt += MultiByteInt31(self.index).to_bytes()
-
-        return bytes(bt)
-
-    @classmethod
-    def parse(cls, fp):
-        """
-        >>> from io import BytesIO
-        >>> fp = BytesIO(b'\\x01a\\x06')
-        >>> dxar = DictionaryXmlnsAttributeRecord.parse(fp)
-        >>> str(dxar.prefix)
-        'a'
-        >>> dxar.index
-        6
-        >>> str(dxar)
-        'xmlns:a="http://www.w3.org/2005/08/addressing"'
-        """
-        prefix = Utf8String.parse(fp).value
-        index = MultiByteInt31.parse(fp).value
-        return cls(prefix, index)
-
-
-class ShortXmlnsAttributeRecord(Attribute):
-    type = 0x08
-
-    def __init__(self, value):
-        self.value = value
-
-    def to_bytes(self):
-        """
-        >>> ShortXmlnsAttributeRecord('test').to_bytes()
-        b'\\x08\\x04test'
-        """
-        bt = struct.pack(b'<B', self.type)
-        bt += Utf8String(self.value).to_bytes()
-        return bytes(bt)
-
-    def __str__(self):
-        return 'xmlns="%s"' % (self.value,)
-
-    @classmethod
-    def parse(cls, fp):
-        """
-        >>> from io import BytesIO
-        >>> fp = BytesIO(b'\\x04test')
-        >>> sxar = ShortXmlnsAttributeRecord.parse(fp)
-        >>> str(sxar)
-        'xmlns="test"'
-        """
-        value = Utf8String.parse(fp).value
-        return cls(value)
-
-
-class XmlnsAttributeRecord(Attribute):
-    type = 0x09
-
-    def __init__(self, name, value):
-        self.name = validate_xml_name(name, 'xmlns prefix')
-        self.value = value
-
-    def to_bytes(self):
-        """
-        >>> XmlnsAttributeRecord('name', 'value').to_bytes()
-        b'\\t\\x04name\\x05value'
-        """
-        bt = struct.pack(b'<B', self.type)
-        bt += Utf8String(validate_xml_name(self.name, 'xmlns prefix')).to_bytes()
-        bt += Utf8String(self.value).to_bytes()
-        return bytes(bt)
-
-    def __str__(self):
-        return 'xmlns:%s="%s"' % (self.name, self.value)
-
-    @classmethod
-    def parse(cls, fp):
-        r"""
-        >>> from io import BytesIO
-        >>> fp = BytesIO(b'\x04name\x05value')
-        >>> str(XmlnsAttributeRecord.parse(fp))
-        'xmlns:name="value"'
-        """
-        name = Utf8String.parse(fp).value
-        value = Utf8String.parse(fp).value
-        return cls(name, value)
+    _has_prefix = True
 
 
 class PrefixAttributeRecord(AttributeRecord):
-    def __init__(self, name, value):
-        super(PrefixAttributeRecord, self).__init__(self.char, name, value)
+    """Prefix a to z, from the record type.
 
-    def to_bytes(self):
-        r"""
-        >>> PrefixAttributeARecord('name', TrueTextRecord()).to_bytes()
-        b'&\x04name\x86'
-        """
-        string = Utf8String(validate_xml_name(self.name, 'attribute name'))
-        return bytes(struct.pack(b'<B', self.type) + string.to_bytes() +
-                     validate_attribute_text(self.value).to_bytes())
-
-    @classmethod
-    def parse(cls, fp):
-        r"""
-        >>> from io import BytesIO
-        >>> fp = BytesIO(b'\x04name\x86')
-        >>> paar = PrefixAttributeARecord.parse(fp)
-        >>> str(paar)
-        'a:name="true"'
-        """
-        name = Utf8String.parse(fp).value
-        return cls(name, read_attribute_text(fp))
+    >>> from wcf.records import TrueTextRecord
+    >>> PrefixAttributeARecord('name', TrueTextRecord()).to_bytes()
+    b'&\\x04name\\x86'
+    """
+    _has_prefix = False
 
 
 class PrefixDictionaryAttributeRecord(DictionaryAttributeRecord):
-    def __init__(self, index, value):
-        super(PrefixDictionaryAttributeRecord, self).__init__(self.char,
-                                                              index, value)
+    """Prefix a to z, from the record type.
+
+    >>> from wcf.records import TrueTextRecord
+    >>> PrefixDictionaryAttributeBRecord(2, TrueTextRecord()).to_bytes()
+    b'\\r\\x02\\x86'
+    >>> from io import BytesIO
+    >>> str(PrefixDictionaryAttributeBRecord.parse(BytesIO(b'\\x02\\x86')))
+    'b:Envelope="true"'
+    """
+    _has_prefix = False
+
+
+class ShortXmlnsAttributeRecord(Attribute):
+    """A namespace declaration: a prefix (a String, ``_has_prefix``; None
+    for the default namespace) and a namespace (a String, or a
+    DictionaryString, ``_by_index``).
+
+    >>> ShortXmlnsAttributeRecord('test').to_bytes()
+    b'\\x08\\x04test'
+    >>> from io import BytesIO
+    >>> str(ShortXmlnsAttributeRecord.parse(BytesIO(b'\\x04test')))
+    'xmlns="test"'
+    """
+    type = 0x08
+    is_xmlns = True
+    _has_prefix = False
+    _by_index = False
+
+    def __init__(self, *args):
+        if len(args) != self._has_prefix + 1:
+            raise TypeError('%s takes %d argument(s)'
+                            % (type(self).__name__, self._has_prefix + 1))
+        if self._has_prefix:
+            self.prefix = validate_xml_name(args[0], 'xmlns prefix')
+        if self._by_index:
+            self.index = args[-1]
+            dictionary[self.index]  # an unknown id is refused
+        elif isinstance(args[-1], str):
+            self.value = args[-1]
+        else:
+            raise TypeError('%s namespace must be str' % type(self).__name__)
+
+    @property
+    def namespace(self):
+        return dictionary[self.index] if self._by_index else self.value
 
     def to_bytes(self):
-        r"""
-        >>> PrefixDictionaryAttributeBRecord(2, TrueTextRecord()).to_bytes()
-        b'\r\x02\x86'
-        """
-        validate_dictionary_xml_name(self.index, 'attribute name')
-        idx = MultiByteInt31(self.index)
-        return bytes(struct.pack(b'<B', self.type) + idx.to_bytes() +
-                     validate_attribute_text(self.value).to_bytes())
+        out = bytearray((self.type,))
+        if self._has_prefix:
+            out += Utf8String(validate_xml_name(self.prefix, 'xmlns prefix')).to_bytes()
+        if self._by_index:
+            dictionary[self.index]  # never write an id unknown to the peer
+            out += MultiByteInt31(self.index).to_bytes()
+        else:
+            out += Utf8String(self.value).to_bytes()
+        return bytes(out)
 
     @classmethod
     def parse(cls, fp):
-        r"""
-        >>> from io import BytesIO
-        >>> fp = BytesIO(b'\02\x86')
-        >>> pdabr = PrefixDictionaryAttributeBRecord.parse(fp)
-        >>> str(pdabr)
-        'b:Envelope="true"'
-        """
-        index = MultiByteInt31.parse(fp).value
-        validate_dictionary_xml_name(index, 'attribute name')
-        return cls(index, read_attribute_text(fp))
+        args = [Utf8String.parse(fp).value] if cls._has_prefix else []
+        args.append(MultiByteInt31.parse(fp).value if cls._by_index
+                    else Utf8String.parse(fp).value)
+        return cls(*args)
 
 
-Record.add_records((
-        ShortAttributeRecord,
-        AttributeRecord,
-        ShortDictionaryAttributeRecord,
-        DictionaryAttributeRecord,
-        ShortDictionaryXmlnsAttributeRecord,
-        DictionaryXmlnsAttributeRecord,
-        ShortXmlnsAttributeRecord,
-        XmlnsAttributeRecord,
-        ))
+class XmlnsAttributeRecord(ShortXmlnsAttributeRecord):
+    """
+    >>> XmlnsAttributeRecord('name', 'value').to_bytes()
+    b'\\t\\x04name\\x05value'
+    >>> from io import BytesIO
+    >>> str(XmlnsAttributeRecord.parse(BytesIO(b'\\x04name\\x05value')))
+    'xmlns:name="value"'
+    """
+    type = 0x09
+    _has_prefix = True
+
+    @property
+    def name(self):
+        """The prefix (former attribute name, kept for compatibility)."""
+        return self.prefix
 
 
-__module__ = sys.modules[__name__]
-__records__ = []
-for c in range(0x0C, 0x25 + 1):
-    char = chr(c - 0x0C + ord('a'))
-    clsname = 'PrefixDictionaryAttribute' + char.upper() + 'Record'
-    cls = type(
-           clsname,
-           (PrefixDictionaryAttributeRecord,),
-           dict(
-                type=c,
-                char=char,
-            )
-           )
-    setattr(__module__, clsname, cls)
-    __records__.append(cls)
+class ShortDictionaryXmlnsAttributeRecord(ShortXmlnsAttributeRecord):
+    """
+    >>> ShortDictionaryXmlnsAttributeRecord(6).to_bytes()
+    b'\\n\\x06'
+    >>> from io import BytesIO
+    >>> str(ShortDictionaryXmlnsAttributeRecord.parse(BytesIO(b'\\x06')))
+    'xmlns="http://www.w3.org/2005/08/addressing"'
+    """
+    type = 0x0A
+    _by_index = True
 
-for c in range(0x26, 0x3F + 1):
-    char = chr(c - 0x26 + ord('a'))
-    clsname = 'PrefixAttribute' + char.upper() + 'Record'
-    cls = type(
-           clsname,
-           (PrefixAttributeRecord,),
-           dict(
-                type=c,
-                char=char,
-            )
-           )
-    setattr(__module__, clsname, cls)
-    __records__.append(cls)
 
-Record.add_records(__records__)
-del __records__
+class DictionaryXmlnsAttributeRecord(ShortDictionaryXmlnsAttributeRecord):
+    """
+    >>> DictionaryXmlnsAttributeRecord('a', 6).to_bytes()
+    b'\\x0b\\x01a\\x06'
+    >>> from io import BytesIO
+    >>> str(DictionaryXmlnsAttributeRecord.parse(BytesIO(b'\\x01a\\x06')))
+    'xmlns:a="http://www.w3.org/2005/08/addressing"'
+    """
+    type = 0x0B
+    _has_prefix = True
+
+
+Record.add_records((ShortAttributeRecord, AttributeRecord,
+                    ShortDictionaryAttributeRecord, DictionaryAttributeRecord,
+                    ShortXmlnsAttributeRecord, XmlnsAttributeRecord,
+                    ShortDictionaryXmlnsAttributeRecord,
+                    DictionaryXmlnsAttributeRecord))
+PREFIX_DICTIONARY_ATTRIBUTES = letter_records(
+    PrefixDictionaryAttributeRecord, 0x0C, 'PrefixDictionaryAttribute%sRecord', globals())
+PREFIX_ATTRIBUTES = letter_records(
+    PrefixAttributeRecord, 0x26, 'PrefixAttribute%sRecord', globals())

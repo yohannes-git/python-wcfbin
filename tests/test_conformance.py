@@ -95,19 +95,19 @@ class ExplicitTyping(unittest.TestCase):
         self.assertIsInstance(records[0].childs[1].childs[0], Chars8TextRecord)
         self.assertEqual('8.0', records[0].childs[1].childs[0].value)
 
-    def test_explicit_float_and_uint32_boundaries(self):
+    def test_explicit_int8_and_float(self):
         xml = '<root><n>-128</n><f>1.5</f></root>'
         result = XMLParser.parse(xml, {'/root/n': 'int8', '/root/f': 'float'})
         self.assertEqual(0x88, result[0].childs[0].childs[0].type)
-        self.assertIsInstance(result[0].childs[1].childs[0], FloatTextRecord)
+        self.assertIs(FloatTextRecord, type(result[0].childs[1].childs[0]))
 
     def test_explicit_attribute(self):
         xml = '<r xmlns:x="urn:x" x:num="-42" num="42"/>'
         result = XMLParser.parse(xml, {'/r/@{urn:x}num': 'int16'})
-        attr_by_name = {getattr(a, 'prefix', ''): a for a in result[0].attributes
-                        if hasattr(a, 'value') and hasattr(a.value, 'type')}
-        self.assertIsInstance(attr_by_name['x'].value, Int16TextRecord)
-        self.assertIsInstance(attr_by_name[''].value, Chars8TextRecord)
+        attr_by_prefix = {a.prefix: a for a in result[0].attributes
+                          if not a.is_xmlns}
+        self.assertIs(Int16TextRecord, type(attr_by_prefix['x'].value))
+        self.assertIs(Chars8TextRecord, type(attr_by_prefix[None].value))
 
     def test_raises_on_invalid_type_or_value(self):
         for typ, val in [('bool', 'maybe'), ('uint64', '-1'),

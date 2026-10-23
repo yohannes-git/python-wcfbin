@@ -26,16 +26,20 @@
 #  THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 #  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 #  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
+"""Record classes, the document parser and its decoding quotas."""
 
 import dataclasses
-import struct
-import logging
+import string
 from contextvars import ContextVar
 
-from wcf.datatypes import *
+from wcf.datatypes import MultiByteInt31, Utf8String
+from wcf.dictionary import dictionary
+from wcf.xmltext import comment, escape_attribute, ncname
 
-log = logging.getLogger(__name__)
+__all__ = ['Record', 'Element', 'Attribute', 'Text', 'EndElementRecord',
+           'CommentRecord', 'ArrayRecord', 'Quotas', 'DEFAULT_QUOTAS',
+           'NO_QUOTAS', 'validate_xml_name', 'validate_dictionary_xml_name',
+           'validate_attribute_text', 'read_attribute_text']
 
 
 @dataclasses.dataclass(frozen=True)
@@ -109,16 +113,17 @@ def charge(records, chars):
 
 
 class Record(object):
-    records = dict()
+    """A record. ``Record.records`` maps the record types to their
+    classes; ``Record.parse()`` parses a whole document."""
+    records = {}
 
     @classmethod
     def add_records(cls, records):
-        """adds records to the lookup table
-
-        :param records: list of Record subclasses
-        :type records: list(Record)
-        """
+        """Register record classes by their type."""
         for r in records:
+            if Record.records.get(r.type, r) is not r:
+                raise RuntimeError('MC-NBFX record type 0x%02X registered twice'
+                                   % r.type)
             Record.records[r.type] = r
 
     def to_bytes(self):
@@ -131,11 +136,10 @@ class Record(object):
         >>> ElementRecord('a', 'test').to_bytes()
         b'A\\x01a\\x04test'
         """
-        return bytes(struct.pack(b'<B', self.type))
+        return bytes((self.type,))
 
     def __repr__(self):
-        args = ['type=0x%X' % self.type]
-        return '<%s(%s)>' % (type(self).__name__, ','.join(args))
+        return '<%s(type=0x%X)>' % (type(self).__name__, self.type)
 
     @classmethod
     def parse(cls, fp, quotas=DEFAULT_QUOTAS):
@@ -143,7 +147,8 @@ class Record(object):
 
         The document is refused with ValueError when it exceeds one of
         the ``quotas`` (DEFAULT_QUOTAS unless given, NO_QUOTAS for
-        trusted input only).
+        trusted input only). On a record class, parse() reads the record
+        after its type: here, a record without fields.
 
         >>> from wcf.records import dump_records
         >>> from io import BytesIO
@@ -160,8 +165,8 @@ class Record(object):
         finally:
             _budget.reset(token)
 
-    @classmethod
-    def _parse_document(cls, fp, max_depth):
+    @staticmethod
+    def _parse_document(fp, max_depth):
         root = []
         records = root
         parents = []  # pairs of (container, open element)
@@ -170,10 +175,10 @@ class Record(object):
             octet = fp.read(1)
             if not octet:
                 break
-            recordtype = octet[0]
-            if recordtype in Record.records:
-                recordclass = Record.records[recordtype]
-                obj = recordclass.parse(fp)
+            record_type = octet[0]
+            record_class = Record.records.get(record_type)
+            if record_class is not None:
+                obj = record_class.parse(fp)
                 _charge_record(obj)
                 if isinstance(obj, EndElementRecord):
                     if not parents:
@@ -186,7 +191,6 @@ class Record(object):
                         raise ValueError('MC-NBFX document nested deeper than %d'
                                          % max_depth)
                     records.append(obj)
-                    obj.childs = []
                     parents.append((records, obj))
                     records = obj.childs
                     open_element = obj
@@ -194,40 +198,89 @@ class Record(object):
                     if not open_element or records is not open_element.childs or records:
                         raise ValueError('Attribute outside element start')
                     open_element.attributes.append(obj)
-                elif isinstance(obj, Text) and obj.type == 0xA6:
+                elif isinstance(obj, Text) and not obj.standalone:
                     raise ValueError('EndListText without StartListText')
                 else:
                     records.append(obj)
-            elif (recordtype & 1 and recordtype >= 0x81 and
-                  recordtype not in (0xA5, 0xA7) and
-                  recordtype - 1 in Record.records and
-                  issubclass(Record.records[recordtype - 1], Text)):
-                if not parents:
-                    raise ValueError('TextWithEndElement outside an element')
-                obj = Record.records[recordtype - 1].parse(fp)
-                _charge_record(obj)
-                records.append(obj)
-                records, closed = parents.pop()
-                closed._wcf_closure = 'implicit'
-                open_element = parents[-1][1] if parents else None
-            else:
-                raise ValueError('Unknown or reserved WCF record 0x%02X' % recordtype)
+                continue
+            # *TextWithEndElement: the text record type + 1 (MC-NBFX 2.2.3.31)
+            record_class = Record.records.get(record_type - 1)
+            if (not record_type & 1 or record_class is None or
+                    not issubclass(record_class, Text) or
+                    not record_class.with_end_element):
+                raise ValueError('Unknown or reserved WCF record 0x%02X' % record_type)
+            if not parents:
+                raise ValueError('TextWithEndElement outside an element')
+            obj = record_class.parse(fp)
+            _charge_record(obj)
+            records.append(obj)
+            records, closed = parents.pop()
+            closed._wcf_closure = 'implicit'
+            open_element = parents[-1][1] if parents else None
         if parents:
             raise ValueError('Unterminated element in WCF Binary XML')
         return root
 
 
-
 class Element(Record):
-    pass
+    """An element record: ``prefix`` (None without), ``name``,
+    ``attributes`` and ``childs``. ``_wcf_closure`` is how a decoded
+    element was closed: 'explicit' (EndElement) or 'implicit'
+    (*TextWithEndElement), kept when it is serialized again."""
+    prefix = None
+    _wcf_closure = None
+
+    @property
+    def qname(self):
+        return self.name if self.prefix is None else '%s:%s' % (self.prefix, self.name)
+
+    def __str__(self):
+        """The start tag.
+
+        >>> from wcf.records import *
+        >>> e = ShortElementRecord('a')
+        >>> e.attributes.append(ShortAttributeRecord('b', Chars8TextRecord('"<')))
+        >>> str(e)
+        '<a b="&quot;&lt;">'
+        """
+        return start_tag(self)
 
 
 class Attribute(Record):
-    pass
+    """An attribute record: ``prefix`` (None without), ``name`` and
+    ``value`` (a text record); or, for a namespace declaration
+    (``is_xmlns``), ``prefix`` (None for the default namespace) and
+    ``namespace``."""
+    prefix = None
+    is_xmlns = False
+
+    @property
+    def qname(self):
+        return self.name if self.prefix is None else '%s:%s' % (self.prefix, self.name)
+
+    def __str__(self):
+        return attribute_xml(self)[1:]
 
 
 class Text(Record):
-    pass
+    """A text record. ``max_chars`` is the length of the longest rendering
+    of a fixed-size type (None for the others), ``standalone`` False for
+    EndListText (only valid closing a list) and ``with_end_element`` False
+    for the records without a *WithEndElement form (StartListText,
+    EndListText)."""
+    max_chars = None
+    standalone = True
+    with_end_element = True
+
+    def char_count(self):
+        """The number of characters represented, or an upper bound."""
+        if self.max_chars is not None:
+            return self.max_chars
+        return len(str(self))
+
+
+class EndElementRecord(Record):
+    type = 0x01
 
 
 def validate_xml_name(name, description='name'):
@@ -245,11 +298,7 @@ def validate_xml_name(name, description='name'):
 
 def validate_dictionary_xml_name(index, description='name'):
     """Resolve an MC-NBFS/NBFSE name and apply the name restrictions."""
-    from wcf.dictionary import dictionary
-    # Keep KeyError for an unresolved session index: callers and the existing
-    # tests use it to distinguish a missing dictionary from an invalid name.
-    name = dictionary[index]
-    return validate_xml_name(name, description)
+    return validate_xml_name(dictionary[index], description)
 
 
 def validate_attribute_text(value):
@@ -257,7 +306,7 @@ def validate_attribute_text(value):
 
     EndListText is valid only as the terminator *inside* StartListText.
     """
-    if (not isinstance(value, Text) or value.type == 0xA6 or
+    if (not isinstance(value, Text) or not value.standalone or
             value.type not in Record.records):
         raise ValueError('MC-NBFX attribute value must be a text record')
     return value
@@ -268,16 +317,78 @@ def read_attribute_text(fp):
     octet = fp.read(1)
     if len(octet) != 1:
         raise ValueError('Truncated MC-NBFX attribute value')
-    record_type = octet[0]
-    record_class = Record.records.get(record_type)
+    record_class = Record.records.get(octet[0])
     if (record_class is None or not issubclass(record_class, Text) or
-            record_type == 0xA6):
-        raise ValueError('Invalid MC-NBFX attribute text record 0x%02X' % record_type)
-    return validate_attribute_text(record_class.parse(fp))
+            not record_class.standalone):
+        raise ValueError('Invalid MC-NBFX attribute text record 0x%02X' % octet[0])
+    return record_class.parse(fp)
 
 
-class EndElementRecord(Element):
-    type = 0x01
+class _DictionaryName(object):
+    """The name of a record that stores it as a DictionaryString, resolved
+    on use so that it always matches the index that is written."""
+
+    @property
+    def name(self):
+        return dictionary[self.index]
+
+
+class _NamedRecord(Record):
+    """The names of the element and attribute records: a prefix, which is
+    a String (``_has_prefix``), the letter of a Prefix* record type (the
+    ``prefix`` class attribute) or none, then a name, which is a String or
+    a DictionaryString (``_by_index``, with _DictionaryName)."""
+    _has_prefix = False
+    _by_index = False
+    _what = 'name'
+
+    def _set_names(self, names):
+        if len(names) != self._has_prefix + 1:
+            raise TypeError('%s takes %d name argument(s)'
+                            % (type(self).__name__, self._has_prefix + 1))
+        if self._has_prefix:
+            self.prefix = validate_xml_name(names[0], self._what + ' prefix')
+        if self._by_index:
+            self.index = names[-1]
+            validate_dictionary_xml_name(self.index, self._what + ' name')
+        else:
+            self.name = validate_xml_name(names[-1], self._what + ' name')
+
+    def _head(self):
+        """The record type and the names."""
+        out = bytearray((self.type,))
+        if self._has_prefix:
+            out += Utf8String(validate_xml_name(self.prefix, self._what + ' prefix')).to_bytes()
+        if self._by_index:
+            validate_dictionary_xml_name(self.index, self._what + ' name')
+            out += MultiByteInt31(self.index).to_bytes()
+        else:
+            out += Utf8String(validate_xml_name(self.name, self._what + ' name')).to_bytes()
+        return out
+
+    @classmethod
+    def _read_names(cls, fp):
+        names = [Utf8String.parse(fp).value] if cls._has_prefix else []
+        names.append(MultiByteInt31.parse(fp).value if cls._by_index
+                     else Utf8String.parse(fp).value)
+        return names
+
+
+def letter_records(base, first_type, name_format, namespace):
+    """Define the 26 classes of ``base`` whose prefix is the letter of
+    their record type (first_type for "a" to first_type + 25 for "z") in
+    ``namespace`` (and its __all__), register them, and return them by
+    letter."""
+    classes = {}
+    for i, letter in enumerate(string.ascii_lowercase):
+        name = name_format % letter.upper()
+        classes[letter] = type(name, (base,), {
+            'type': first_type + i, 'prefix': letter, 'char': letter,
+            '__module__': namespace['__name__'], '__qualname__': name})
+    namespace.update((c.__name__, c) for c in classes.values())
+    namespace['__all__'].extend(c.__name__ for c in classes.values())
+    Record.add_records(classes.values())
+    return classes
 
 
 class CommentRecord(Record):
@@ -291,55 +402,44 @@ class CommentRecord(Record):
         >>> CommentRecord('test').to_bytes()
         b'\\x02\\x04test'
         """
-        string = Utf8String(self.comment)
-
-        return bytes(super(CommentRecord, self).to_bytes() +
-                     string.to_bytes())
+        return bytes((self.type,)) + Utf8String(self.comment).to_bytes()
 
     def __str__(self):
         """
         >>> str(CommentRecord('test'))
-        '<!-- test -->'
+        '<!--test-->'
         """
-        return '<!-- %s -->' % self.comment
+        return comment(self.comment)
 
     @classmethod
     def parse(cls, fp):
-        data = Utf8String.parse(fp).value
-        return cls(data)
+        return cls(Utf8String.parse(fp).value)
 
 
 class ArrayRecord(Record):
+    """MC-NBFX 2.3.3: an element (with its attributes) repeated for each
+    value of a typed array."""
     type = 0x03
 
-    datatypes = {
-        0xB5: ('BoolTextWithEndElement', 1, '?'),
-        0x8B: ('Int16TextWithEndElement', 2, 'h'),
-        0x8D: ('Int32TextWithEndElement', 4, 'i'),
-        0x8F: ('Int64TextWithEndElement', 8, 'q'),
-        0x91: ('FloatTextWithEndElement', 4, 'f'),
-        0x93: ('DoubleTextWithEndElement', 8, 'd'),
-        0x95: ('DecimalTextWithEndElement', 16, ''),
-        0x97: ('DateTimeTextWithEndElement', 8, ''),
-        0xAF: ('TimeSpanTextWithEndElement', 8, ''),
-        0xB1: ('UuidTextWithEndElement', 16, ''),
-    }
+    # the *TextWithEndElement record types an array can hold
+    datatypes = frozenset((0xB5, 0x8B, 0x8D, 0x8F, 0x91, 0x93, 0x95, 0x97,
+                           0xAF, 0xB1))
 
     def __init__(self, element, data, attributes):
         self.element = element
-        self.count = len(data)
         self.data = data
-        recordtype = None
-        for data in self.data:
-            if recordtype is None:
-                recordtype = data.type + 1
-            else:
-                if recordtype != data.type + 1:
-                    raise ValueError('ArrayRecord requires a single type')
-        self.recordtype = recordtype
         self.attributes = list(attributes)
-        if self.count == 0 or self.recordtype not in self.datatypes:
-            raise ValueError('ArrayRecord requires a non-empty, supported typed array')
+        self.recordtype = self._check()
+
+    def _check(self):
+        """The *WithEndElement record type of the items."""
+        if not self.data:
+            raise ValueError('ArrayRecord cannot be empty')
+        record_type = self.data[0].type + 1
+        if (record_type not in self.datatypes or
+                any(item.type + 1 != record_type for item in self.data)):
+            raise ValueError('ArrayRecord requires one supported element type')
+        return record_type
 
     def to_bytes(self):
         """
@@ -348,21 +448,16 @@ class ArrayRecord(Record):
         >>> ArrayRecord(ShortElementRecord('item'), [Int32TextRecord(1), Int32TextRecord(2), Int32TextRecord(3)], []).to_bytes()
         b'\\x03@\\x04item\\x01\\x8d\\x03\\x01\\x00\\x00\\x00\\x02\\x00\\x00\\x00\\x03\\x00\\x00\\x00'
         """
-        bt = super(ArrayRecord, self).to_bytes()
-        bt += self.element.to_bytes()
-        for attrib in self.attributes:
-            bt += attrib.to_bytes()
-        bt += EndElementRecord().to_bytes()
-        if not self.data:
-            raise ValueError('ArrayRecord cannot be empty')
-        expected = self.data[0].type + 1
-        if expected not in self.datatypes or any(item.type + 1 != expected for item in self.data):
-            raise ValueError('ArrayRecord requires one supported element type')
-        bt += bytes(struct.pack(b'<B', expected))
-        bt += MultiByteInt31(len(self.data)).to_bytes()
-        for data in self.data:
-            bt += data.to_bytes()[1:]
-        return bytes(bt)
+        out = bytearray((self.type,))
+        out += self.element.to_bytes()
+        for attribute in self.attributes:
+            out += attribute.to_bytes()
+        out.append(EndElementRecord.type)
+        out.append(self._check())
+        out += MultiByteInt31(len(self.data)).to_bytes()
+        for item in self.data:
+            out += item.to_bytes()[1:]
+        return bytes(out)
 
     @classmethod
     def parse(cls, fp):
@@ -379,25 +474,23 @@ class ArrayRecord(Record):
         octet = fp.read(1)
         if len(octet) != 1:
             raise ValueError('Truncated ArrayRecord element')
-        element_type = octet[0]
-        element_class = Record.records.get(element_type)
-        if element_class is None or not issubclass(element_class, Element) or element_type == EndElementRecord.type:
-            raise ValueError('Invalid ArrayRecord element type 0x%02X' % element_type)
+        element_class = Record.records.get(octet[0])
+        if element_class is None or not issubclass(element_class, Element):
+            raise ValueError('Invalid ArrayRecord element type 0x%02X' % octet[0])
         element = element_class.parse(fp)
         attributes = []
         while True:
             octet = fp.read(1)
             if len(octet) != 1:
                 raise ValueError('Truncated ArrayRecord attributes')
-            record_type = octet[0]
-            if record_type == EndElementRecord.type:
+            if octet[0] == EndElementRecord.type:
                 break
             # the type is checked before the record is read: another Array
             # here would recurse without bound
-            record_class = Record.records.get(record_type)
+            record_class = Record.records.get(octet[0])
             if record_class is None or not issubclass(record_class, Attribute):
                 raise ValueError('Invalid ArrayRecord attribute record 0x%02X'
-                                 % record_type)
+                                 % octet[0])
             attribute = record_class.parse(fp)
             # charged as they are read, not once all are allocated
             charge(*_attribute_cost(attribute))
@@ -405,24 +498,20 @@ class ArrayRecord(Record):
         octet = fp.read(1)
         if len(octet) != 1:
             raise ValueError('Truncated ArrayRecord data type')
-        recordtype = octet[0]
-        if recordtype not in cls.datatypes:
-            raise ValueError('Unsupported ArrayRecord type 0x%02X' % recordtype)
+        if octet[0] not in cls.datatypes:
+            raise ValueError('Unsupported ArrayRecord type 0x%02X' % octet[0])
+        item_class = Record.records[octet[0] - 1]
         count = MultiByteInt31.parse(fp).value
         if count == 0:
             raise ValueError('ArrayRecord length cannot be zero')
         # every item stands for <name attributes>value</name>
-        item_records, item_chars = 1, (2 * _name_chars(element) +
-                                       Record.records[recordtype - 1].max_chars)
+        item_records, item_chars = 1, 2 * _name_chars(element) + item_class.max_chars
         for attribute in attributes:
             records, chars = _attribute_cost(attribute)
             item_records += records
             item_chars += chars
         charge(count * item_records, count * item_chars)
-        data = []
-        for i in range(count):
-            data.append(Record.records[recordtype-1].parse(fp))
-        return cls(element, data, attributes)
+        return cls(element, [item_class.parse(fp) for _ in range(count)], attributes)
 
     def __str__(self):
         """
@@ -431,78 +520,65 @@ class ArrayRecord(Record):
         >>> str(ArrayRecord(ShortElementRecord('item'), [Int32TextRecord(1), Int32TextRecord(2), Int32TextRecord(3)], []))
         '<item>1</item><item>2</item><item>3</item>'
         """
-        from xml.sax.saxutils import escape
-        name = ('%s:%s' % (self.element.prefix, self.element.name)
-                if hasattr(self.element, 'prefix') else self.element.name)
-        opening = str(self.element)
-        if self.attributes:
-            opening = opening[:-1] + ' ' + ' '.join(map(str, self.attributes)) + '>'
-        return ''.join(opening + escape(str(data)) + '</%s>' % name
-                       for data in self.data)
+        from wcf.records import render_xml
+        return render_xml([self])
 
 
+# --- XML of the element and attribute records -----------------------------
 
-def _dictionary_chars(index):
-    """Length of a dictionary string; resolving it also rejects an id
-    that is in neither the static nor the session dictionary, so that a
-    decoded tree never depends on a later session state."""
-    from wcf.dictionary import dictionary
-    return len(dictionary[index])
+def qualified_name(record):
+    """The qualified name of an element or attribute record, ValueError if
+    XML cannot carry it."""
+    name = ncname(record.name)
+    return name if record.prefix is None else '%s:%s' % (ncname(record.prefix), name)
 
 
-def text_chars(record):
-    """The number of characters a text record represents, or an upper
-    bound of it for the fixed-size types (their max_chars)."""
-    count = getattr(record, 'max_chars', None)
-    if count is not None:
-        return count
-    if hasattr(record, 'index'):
-        # DictionaryText, QNameDictionaryText ("p:" + name)
-        return _dictionary_chars(record.index) + (2 if hasattr(record, 'prefix') else 0)
-    value = getattr(record, 'value', None)
-    if isinstance(value, str):
-        return len(value)
-    if isinstance(value, (bytes, bytearray)):
-        return 4 * ((len(value) + 2) // 3)  # base64
-    return 0  # StartListText: its items are charged as they are read
+def attribute_xml(attribute):
+    """' name="value"' for an attribute record."""
+    if attribute.is_xmlns:
+        name = ('xmlns' if attribute.prefix is None
+                else 'xmlns:' + ncname(attribute.prefix))
+        value = attribute.namespace
+    else:
+        name = qualified_name(attribute)
+        value = str(attribute.value)
+    return ' %s="%s"' % (name, escape_attribute(value))
 
+
+def start_tag(element, attributes=()):
+    """The start tag of an element record, with extra ``attributes``."""
+    return '<%s%s>' % (qualified_name(element),
+                       ''.join(attribute_xml(a) for a in
+                               list(element.attributes) + list(attributes)))
+
+
+# --- decoding cost --------------------------------------------------------
 
 def _name_chars(record):
-    """Characters of the names, prefix and namespace URI of an element
-    or attribute record (XmlnsAttribute.name is its prefix)."""
-    count = 0
-    for field in ('prefix', 'name'):
-        value = getattr(record, field, None)
-        if isinstance(value, str):
-            count += len(value)
-    if hasattr(record, 'index') and not isinstance(record, Element):
-        count += _dictionary_chars(record.index)
-    if isinstance(getattr(record, 'value', None), str):
-        count += len(record.value)  # ShortXmlns/Xmlns namespace URI
-    return count
+    """Characters of the qualified name of an element or attribute record
+    (resolving a dictionary name rejects an unknown id)."""
+    count = len(record.name)
+    return count if record.prefix is None else count + len(record.prefix) + 1
 
 
 def _attribute_cost(record):
     """(records, characters) of an attribute record and its value."""
-    value = getattr(record, 'value', None)
-    if isinstance(value, Text):
-        return 2, _name_chars(record) + text_chars(value)
-    return 1, _name_chars(record)  # xmlns declaration
+    if record.is_xmlns:
+        return 1, len(record.prefix or '') + len(record.namespace)
+    return 2, _name_chars(record) + record.value.char_count()
 
 
 def _charge_record(record):
     """Charge a record read by Record.parse (array and list items are
     charged by their own parse())."""
     if isinstance(record, Text):
-        charge(1, text_chars(record))
+        charge(1, record.char_count())
     elif isinstance(record, Attribute):
         charge(*_attribute_cost(record))
     elif isinstance(record, CommentRecord):
         charge(1, len(record.comment))
-    elif isinstance(record, Element) and not isinstance(record, EndElementRecord):
+    elif isinstance(record, Element):
         charge(1, 2 * _name_chars(record))  # start and end tags
 
 
-Record.add_records((EndElementRecord,
-        CommentRecord,
-        ArrayRecord,))
+Record.add_records((EndElementRecord, CommentRecord, ArrayRecord))

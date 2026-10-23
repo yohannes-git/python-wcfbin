@@ -196,14 +196,14 @@ class NameAndAttributeValidation(unittest.TestCase):
             for index in (1, 3):
                 with self.subTest(index=index), self.assertRaises(ValueError):
                     ShortDictionaryElementRecord(index)
+                # checked at construction, like the element records
                 for maker in (
                     lambda: ShortDictionaryAttributeRecord(index, TrueTextRecord()),
                     lambda: DictionaryAttributeRecord('p', index, TrueTextRecord()),
                     lambda: PrefixDictionaryAttributeARecord(index, TrueTextRecord()),
                 ):
-                    attr = maker()
                     with self.assertRaises(ValueError):
-                        attr.to_bytes()
+                        maker()
             self.assertEqual('widget', ShortDictionaryElementRecord(5).name)
             self.assertTrue(ShortDictionaryAttributeRecord(5, TrueTextRecord()).to_bytes())
 
