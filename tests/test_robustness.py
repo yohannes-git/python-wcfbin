@@ -8,7 +8,6 @@ from xml.etree import ElementTree as ET
 
 from wcf.errors import WcfBinaryError
 from wcf.records import Record, dump_records, render_xml
-from wcf.xml2records import XMLParser
 from wcf.session import BinaryXmlSession
 from wcf.records.text import QNameDictionaryTextRecord
 

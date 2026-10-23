@@ -5,7 +5,7 @@ import random
 import struct
 import unittest
 
-from wcf.datatypes import Decimal, MultiByteInt31, Utf8String
+from wcf.datatypes import Decimal, MultiByteInt31
 from wcf.dictionary import dictionary_context
 from wcf.records import (
     Record, Quotas, NO_QUOTAS, render_xml, dump_records,

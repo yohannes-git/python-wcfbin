@@ -3,8 +3,8 @@ import io
 import unittest
 
 from wcf.records import Record, render_xml
-from wcf.records.text import FloatTextRecord, DoubleTextRecord, DatetimeTextRecord, TimeSpanTextRecord
-from wcf.xml2records import XMLParser
+from wcf.records.text import (DoubleTextRecord, DatetimeTextRecord,
+                              TimeSpanTextRecord)
 from wcf.session import BinaryXmlSession
 
 

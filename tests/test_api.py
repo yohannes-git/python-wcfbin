@@ -3,12 +3,13 @@
 import io
 import unittest
 
-from wcf.records import (
-    render_xml, dump_records, ShortElementRecord, ElementRecord,
-    ShortDictionaryElementRecord, DictionaryElementRecord, CommentRecord,
-    XmlnsAttributeRecord, ShortXmlnsAttributeRecord, ZeroTextRecord,
-    Chars8TextRecord, UnicodeChars8TextRecord, Bytes8TextRecord,
-    Bytes32TextRecord, DatetimeTextRecord)
+from wcf.records import (render_xml, ShortElementRecord, ElementRecord,
+                         ShortDictionaryElementRecord, DictionaryElementRecord,
+                         CommentRecord, XmlnsAttributeRecord,
+                         ShortXmlnsAttributeRecord, ZeroTextRecord,
+                         Chars8TextRecord, UnicodeChars8TextRecord,
+                         Bytes8TextRecord, Bytes32TextRecord,
+                         DatetimeTextRecord)
 
 
 class ConstructorTests(unittest.TestCase):

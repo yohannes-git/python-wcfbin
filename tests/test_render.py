@@ -1,7 +1,6 @@
 """render_xml(): the XML text must have the structure of the records."""
 
 import io
-import struct
 import unittest
 from xml.etree import ElementTree as ET
 

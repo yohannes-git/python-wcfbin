@@ -16,10 +16,9 @@ from wcf.records.attributes import (
     PrefixAttributeARecord, PrefixDictionaryAttributeARecord, ShortAttributeRecord,
     ShortDictionaryAttributeRecord, XmlnsAttributeRecord,
 )
-from wcf.records.elements import (
-    DictionaryElementRecord, ElementRecord, PrefixDictionaryElementARecord,
-    PrefixElementARecord, ShortDictionaryElementRecord, ShortElementRecord,
-)
+from wcf.records.elements import (ElementRecord, PrefixElementARecord,
+                                  ShortDictionaryElementRecord,
+                                  ShortElementRecord)
 from wcf.records.text import (
     Bytes32TextRecord, Chars32TextRecord, DoubleTextRecord, FloatTextRecord,
     StartListTextRecord, TrueTextRecord, UnicodeChars8TextRecord,

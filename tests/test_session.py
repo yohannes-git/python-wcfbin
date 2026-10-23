@@ -5,9 +5,8 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor
 from xml.etree import ElementTree as ET
 
-from wcf.datatypes import MultiByteInt31, Utf8String
 from wcf.dictionary import dictionary, inverted_dict
-from wcf.records import Record, dump_records, render_xml
+from wcf.records import Record
 from wcf.session import BinaryXmlSession, encode_string_table
 
 

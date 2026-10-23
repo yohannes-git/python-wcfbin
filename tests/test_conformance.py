@@ -8,19 +8,18 @@ import io
 import os
 import subprocess
 import sys
-import re
 import unittest
 from xml.etree import ElementTree as ET
 
 from wcf.datatypes import MultiByteInt31, Utf8String, Decimal
-from wcf.records import (
-    ArrayRecord, BoolTextRecord, Chars8TextRecord, Chars16TextRecord,
-    Chars32TextRecord, CommentRecord, DatetimeTextRecord, DecimalTextRecord,
-    DoubleTextRecord, FloatTextRecord, Int16TextRecord, Int32TextRecord,
-    Record, ShortAttributeRecord, ShortElementRecord, ShortXmlnsAttributeRecord,
-    StartListTextRecord, TimeSpanTextRecord, UnicodeChars8TextRecord,
-    dump_records, render_xml,
-)
+from wcf.records import (ArrayRecord, BoolTextRecord, Chars8TextRecord,
+                         Chars16TextRecord, Chars32TextRecord,
+                         DatetimeTextRecord, DecimalTextRecord,
+                         DoubleTextRecord, FloatTextRecord, Int16TextRecord,
+                         Int32TextRecord, Record, ShortAttributeRecord,
+                         ShortElementRecord, ShortXmlnsAttributeRecord,
+                         StartListTextRecord, TimeSpanTextRecord, dump_records,
+                         render_xml)
 from wcf.xml2records import XMLParser
 
 
