@@ -1,6 +1,6 @@
-import subprocess
-import sys
 import unittest
+
+from tests.support import run_python
 
 
 class LibraryHygieneTest(unittest.TestCase):
@@ -11,8 +11,7 @@ class LibraryHygieneTest(unittest.TestCase):
         # and turn the application's own basicConfig() call into a no-op.
         code = ('import logging, wcf.records, wcf.xml2records, wcf.session; '
                 'print(len(logging.getLogger().handlers))')
-        out = subprocess.check_output([sys.executable, '-c', code])
-        self.assertEqual(b'0', out.strip())
+        self.assertEqual('0', run_python(code).strip())
 
 
 if __name__ == '__main__':

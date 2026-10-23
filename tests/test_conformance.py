@@ -5,9 +5,6 @@ complete WCF/.NET interoperability or MC-NBFSE certification suite.
 """
 
 import io
-import os
-import subprocess
-import sys
 import unittest
 from xml.etree import ElementTree as ET
 
@@ -21,6 +18,8 @@ from wcf.records import (ArrayRecord, BoolTextRecord, Chars8TextRecord,
                          StartListTextRecord, TimeSpanTextRecord, dump_records,
                          render_xml)
 from wcf.xml2records import XMLParser
+
+from tests.support import local_times
 
 
 class TextDefaults(unittest.TestCase):
@@ -264,17 +263,6 @@ class BinaryFidelity(unittest.TestCase):
         self.assertEqual('1970-01-01T00:00:00.0000001Z',
                          str(DatetimeTextRecord(621355968000000001, 1)))
 
-    def local_times(self, tz, values):
-        """str() of local DateTimeText records in a host whose time zone is
-        the fixed offset tz (POSIX TZ syntax, e.g. "XST-02" is +02:00)."""
-        code = ('import sys; from wcf.records import DatetimeTextRecord\n'
-                'for v in %r:\n'
-                '    try: print(DatetimeTextRecord(v, 2))\n'
-                '    except ValueError as e: print(type(e).__name__)' % (values,))
-        out = subprocess.run([sys.executable, '-c', code], capture_output=True,
-                             env=dict(os.environ, TZ=tz), check=True)
-        return out.stdout.decode().split()
-
     def test_datetime_local_as_dotnet_from_binary(self):
         # the field holds the UTC ticks (DateTime.ToBinary()), rendered as
         # the local time of the decoding host with its offset
@@ -286,16 +274,16 @@ class BinaryFidelity(unittest.TestCase):
             '0001-01-01T01:00:00+02:00',          # -1 h UTC, stored folded
             '9999-12-31T23:59:59.9999999+02:00',  # DateTime.MaxValue
             'WcfBinaryError',                     # beyond 9999-12-31 once local
-        ], self.local_times('XST-02', [utc, ceiling - hour,
+        ], local_times('XST-02', [utc, ceiling - hour,
                                        max_ticks - 1 - 2 * hour, max_ticks - 1]))
         # an offset in seconds (local mean time) counts in whole minutes,
         # truncated towards zero: the written time is the instant
         self.assertEqual(['2006-05-17T08:29:30.123+00:09', '2006-05-17T08:11:30.123-00:09'],
-                         self.local_times('XST-00:09:21', [utc]) +
-                         self.local_times('XST+00:09:21', [utc]))
+                         local_times('XST-00:09:21', [utc]) +
+                         local_times('XST+00:09:21', [utc]))
         # a small time below 0001-01-01 wraps around in the day, as .NET does
         self.assertEqual(['0001-01-01T21:00:00-05:00', '2006-05-17T03:20:30.123-05:00'],
-                         self.local_times('XST+05', [2 * hour, utc]))
+                         local_times('XST+05', [2 * hour, utc]))
 
     def test_decimal_less_than_one(self):
         self.assertEqual('0.001', str(Decimal(False, 0, 1, 3)))

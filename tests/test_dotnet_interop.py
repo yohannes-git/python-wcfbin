@@ -42,17 +42,32 @@ def same_number(a, b, single):
     return x == y or (x != x and y != y)  # NaN
 
 
+XSI_TYPE = '{http://www.w3.org/2001/XMLSchema-instance}type'
+
+
+def floating(element):
+    """Whether an element holds a float or a double: the DataContract
+    members F and D, the items of float and double arrays, and the object
+    values of xsi:type float or double."""
+    if element.tag.split('}')[-1] in ('F', 'D', 'float', 'double'):
+        return True
+    return element.get(XSI_TYPE, '').rpartition(':')[2] in ('float', 'double')
+
+
 def differences(ours, theirs, path=''):
-    """The differences of two element trees; a number written differently
-    (.NET Framework writes "R", not the shortest form) is the same value."""
+    """The differences of two element trees. A float or a double may be
+    written differently (.NET Framework writes "R", not the shortest
+    form) for the same value; any other text must be identical."""
     if ours.tag != theirs.tag or ours.attrib != theirs.attrib:
         return ['%s: %s %s != %s %s' % (path, ours.tag, ours.attrib,
                                         theirs.tag, theirs.attrib)]
     out = []
-    a, b = ours.text or '', theirs.text or ''
-    single = ours.tag.split('}')[-1] in ('float', 'F')
-    if a != b and not same_number(a, b, single):
-        out.append('%s: %r != %r' % (path, a[:60], b[:60]))
+    for name, a, b in (('text', ours.text or '', theirs.text or ''),
+                       ('tail', ours.tail or '', theirs.tail or '')):
+        if a != b and not (name == 'text' and floating(ours) and
+                           same_number(a, b, ours.tag.endswith(('}float', '}F')) or
+                                       ours.get(XSI_TYPE, '').endswith(':float'))):
+            out.append('%s %s: %r != %r' % (path, name, a[:60], b[:60]))
     if len(ours) != len(theirs):
         return out + ['%s: %d != %d children' % (path, len(ours), len(theirs))]
     for i, (x, y) in enumerate(zip(ours, theirs)):

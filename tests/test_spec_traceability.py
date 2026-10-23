@@ -49,6 +49,8 @@ from wcf.records.elements import PREFIX_DICTIONARY_ELEMENTS, PREFIX_ELEMENTS
 from wcf.session import BinaryXmlSession, encode_string_table
 from wcf.xml2records import XMLParser
 
+from tests.support import local_times
+
 _EXPECT_NC = os.environ.get('WCF_TRACE_EXPECT_NONCONFORMANT') == '1'
 
 
@@ -1530,36 +1532,22 @@ class NBFX_2_2_3_12_DateTimeText(unittest.TestCase):
     def test_NBFX_2_2_3_12_TZ_UTC(self):
         self.assertEqual('2006-05-17T00:00:00Z', str(DatetimeTextRecord(632834208000000000, 1)))
 
-    @staticmethod
-    def local_times(tz, values):
-        """str() of local DateTimeText records on a host in the fixed-offset
-        time zone ``tz`` (POSIX TZ: "XST-02" is +02:00)."""
-        import subprocess
-        import sys
-        code = ('from wcf.records import DatetimeTextRecord\n'
-                'for v in %r:\n'
-                '    try: print(DatetimeTextRecord(v, 2))\n'
-                '    except ValueError as e: print(type(e).__name__)' % (values,))
-        out = subprocess.run([sys.executable, '-c', code], capture_output=True, check=True,
-                             env=dict(os.environ, TZ=tz,
-                                      PYTHONPATH=os.pathsep.join(__import__('sys').path)))
-        return out.stdout.decode().split()
 
     def test_NBFX_2_2_3_12_TZ_LOCAL(self):
         # "+HH:mm" / "-HH:mm", the offset of the decoding host; documented:
         # the field holds the UTC ticks (.NET DateTime.ToBinary())
         midnight_utc = 632834208000000000
-        self.assertEqual(['2006-05-17T02:00:00+02:00'], self.local_times('XST-02', [midnight_utc]))
-        self.assertEqual(['2006-05-16T19:00:00-05:00'], self.local_times('XST+05', [midnight_utc]))
-        self.assertEqual(['2006-05-17T05:30:00+05:30'], self.local_times('XST-05:30', [midnight_utc]))
-        self.assertEqual(['2006-05-17T00:00:00+00:00'], self.local_times('UTC', [midnight_utc]))
+        self.assertEqual(['2006-05-17T02:00:00+02:00'], local_times('XST-02', [midnight_utc]))
+        self.assertEqual(['2006-05-16T19:00:00-05:00'], local_times('XST+05', [midnight_utc]))
+        self.assertEqual(['2006-05-17T05:30:00+05:30'], local_times('XST-05:30', [midnight_utc]))
+        self.assertEqual(['2006-05-17T00:00:00+00:00'], local_times('UTC', [midnight_utc]))
 
     def test_NBFX_2_2_3_12_VALUE_MAX_LOCAL(self):
         # documented: for TZ=2 the field is DateTime.ToBinary(), a time
         # before 0001-01-01T00:00:00Z being folded below 2^62
         hour = 3600 * 10 ** 7
         self.assertEqual(['0001-01-01T01:00:00+02:00'],
-                         self.local_times('XST-02', [(1 << 62) - hour]))
+                         local_times('XST-02', [(1 << 62) - hour]))
         with self.assertRaises(WcfBinaryError):
             DatetimeTextRecord(1 << 62, 2).to_bytes()
 
