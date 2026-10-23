@@ -289,6 +289,11 @@ class BinaryFidelity(unittest.TestCase):
             'WcfBinaryError',                     # beyond 9999-12-31 once local
         ], self.local_times('XST-02', [utc, ceiling - hour,
                                        max_ticks - 1 - 2 * hour, max_ticks - 1]))
+        # an offset in seconds (local mean time) counts in whole minutes,
+        # truncated towards zero: the written time is the instant
+        self.assertEqual(['2006-05-17T08:29:30.123+00:09', '2006-05-17T08:11:30.123-00:09'],
+                         self.local_times('XST-00:09:21', [utc]) +
+                         self.local_times('XST+00:09:21', [utc]))
         # a small time below 0001-01-01 wraps around in the day, as .NET does
         self.assertEqual(['0001-01-01T21:00:00-05:00', '2006-05-17T03:20:30.123-05:00'],
                          self.local_times('XST+05', [2 * hour, utc]))

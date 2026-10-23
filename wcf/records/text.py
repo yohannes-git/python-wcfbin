@@ -560,6 +560,10 @@ class DatetimeTextRecord(Text):
         if ticks > TICKS_CEILING - TICKS_PER_DAY:
             ticks -= TICKS_CEILING  # before 0001-01-01T00:00:00Z
         offset = _local_utc_offset(min(max(ticks, 0), MAX_DATETIME_TICKS - 1))
+        # whole minutes, truncated towards zero, as written: a local mean
+        # time offset (+00:09:21) would otherwise shift the instant
+        minute = 60 * TICKS_PER_SECOND
+        offset = offset // minute * minute if offset >= 0 else -(-offset // minute * minute)
         ticks += offset
         if ticks < 0:
             ticks += TICKS_PER_DAY  # as .NET does
@@ -588,7 +592,7 @@ class DatetimeTextRecord(Text):
         if self.tz == 1:
             text += 'Z'
         elif self.tz == 2:
-            minutes = offset // (60 * TICKS_PER_SECOND)
+            minutes = offset // (60 * TICKS_PER_SECOND)  # exact: whole minutes
             text += '%s%02d:%02d' % ('+' if minutes >= 0 else '-',
                                     abs(minutes) // 60, abs(minutes) % 60)
         return text
