@@ -42,7 +42,7 @@ from wcf.dictionary import *
 class ShortElementRecord(Element):
     type = 0x40
 
-    def __init__(self, name, *args, **kwargs):
+    def __init__(self, name):
         self.childs = []
         self.name = validate_xml_name(name, 'element name')
         self.attributes = []
@@ -84,7 +84,7 @@ class ShortElementRecord(Element):
 class ElementRecord(ShortElementRecord):
     type = 0x41
 
-    def __init__(self, prefix, name, *args, **kwargs):
+    def __init__(self, prefix, name):
         super(ElementRecord, self).__init__(name)
         self.prefix = validate_xml_name(prefix, 'element prefix')
 
@@ -121,11 +121,16 @@ class ElementRecord(ShortElementRecord):
 class ShortDictionaryElementRecord(Element):
     type = 0x42
 
-    def __init__(self, index, *args, **kwargs):
+    def __init__(self, index):
         self.childs = []
         self.index = index
         self.attributes = []
-        self.name = validate_dictionary_xml_name(self.index, 'element name')
+        validate_dictionary_xml_name(self.index, 'element name')
+
+    @property
+    def name(self):
+        """Resolved on use, so that it always matches the index written."""
+        return dictionary[self.index]
 
     def __str__(self):
         attribs = ' '.join([str(a) for a in self.attributes])
@@ -164,12 +169,17 @@ class ShortDictionaryElementRecord(Element):
 class DictionaryElementRecord(Element):
     type = 0x43
 
-    def __init__(self, prefix, index, *args, **kwargs):
+    def __init__(self, prefix, index):
         self.childs = []
         self.prefix = validate_xml_name(prefix, 'element prefix')
         self.index = index
         self.attributes = []
-        self.name = validate_dictionary_xml_name(self.index, 'element name')
+        validate_dictionary_xml_name(self.index, 'element name')
+
+    @property
+    def name(self):
+        """Resolved on use, so that it always matches the index written."""
+        return dictionary[self.index]
 
     def __str__(self):
         """

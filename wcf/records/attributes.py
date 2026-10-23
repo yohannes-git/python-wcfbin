@@ -279,8 +279,7 @@ class DictionaryXmlnsAttributeRecord(Attribute):
 class ShortXmlnsAttributeRecord(Attribute):
     type = 0x08
 
-    def __init__(self, value, *args, **kwargs):
-        super(ShortXmlnsAttributeRecord, self).__init__(*args, **kwargs)
+    def __init__(self, value):
         self.value = value
 
     def to_bytes(self):
@@ -311,8 +310,7 @@ class ShortXmlnsAttributeRecord(Attribute):
 class XmlnsAttributeRecord(Attribute):
     type = 0x09
 
-    def __init__(self, name, value, *args, **kwargs):
-        super(XmlnsAttributeRecord, self).__init__(*args, **kwargs)
+    def __init__(self, name, value):
         self.name = validate_xml_name(name, 'xmlns prefix')
         self.value = value
 

@@ -122,17 +122,13 @@ class Record(object):
         for r in records:
             Record.records[r.type] = r
 
-    def __init__(self, type=None):
-        if type:
-            self.type = type
-
     def to_bytes(self):
         """
         Generates the representing bytes of the record
 
         >>> from wcf.records import *
-        >>> Record(0xff).to_bytes()
-        b'\\xff'
+        >>> ZeroTextRecord().to_bytes()
+        b'\\x80'
         >>> ElementRecord('a', 'test').to_bytes()
         b'A\\x01a\\x04test'
         """
@@ -288,7 +284,7 @@ class EndElementRecord(Element):
 class CommentRecord(Record):
     type = 0x02
 
-    def __init__(self, comment, *args, **kwargs):
+    def __init__(self, comment):
         self.comment = comment
 
     def to_bytes(self):

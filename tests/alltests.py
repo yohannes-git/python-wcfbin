@@ -50,7 +50,7 @@ class Suite(unittest.TestSuite):
         from tests import (test_conformance, test_session, test_robustness,
                            test_microsoft_independent, test_microsoft_boundaries,
                            test_library_hygiene, test_render,
-                           test_quotas, test_xml_input)
+                           test_quotas, test_xml_input, test_api)
         self.addTest(doctest.DocTestSuite(datatypes))
         self.addTest(doctest.DocTestSuite(xml2records))
         self.addTest(doctest.DocTestSuite(xmltext))
@@ -68,6 +68,7 @@ class Suite(unittest.TestSuite):
         self.addTests(unittest.defaultTestLoader.loadTestsFromModule(test_render))
         self.addTests(unittest.defaultTestLoader.loadTestsFromModule(test_quotas))
         self.addTests(unittest.defaultTestLoader.loadTestsFromModule(test_xml_input))
+        self.addTests(unittest.defaultTestLoader.loadTestsFromModule(test_api))
 
 if __name__ == '__main__':
     result = unittest.TextTestRunner(verbosity=1).run(Suite())

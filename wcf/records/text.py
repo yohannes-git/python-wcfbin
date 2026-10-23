@@ -320,7 +320,10 @@ class UnicodeChars8TextRecord(_LengthPrefixedText):
     type = 0xB6
 
     def __init__(self, value):
-        super().__init__(value if isinstance(value, str) else str(value))
+        if not isinstance(value, str):
+            raise TypeError('%s value must be str, not %s'
+                            % (type(self).__name__, type(value).__name__))
+        super().__init__(value)
 
     def _encode(self):
         return self.value.encode('utf-16le')
@@ -536,7 +539,7 @@ class DatetimeTextRecord(Text):
 
         if tz not in (0, 1, 2) or value >= 3155378976000000000:
             raise ValueError('Invalid MC-NBFX DateTimeText bits')
-        return DatetimeTextRecord(value, tz)
+        return cls(value, tz)
 
 
 class Chars8TextRecord(_LengthPrefixedText):
@@ -561,7 +564,10 @@ class Chars8TextRecord(_LengthPrefixedText):
     type = 0x98
 
     def __init__(self, value):
-        super().__init__(value if isinstance(value, str) else str(value))
+        if not isinstance(value, str):
+            raise TypeError('%s value must be str, not %s'
+                            % (type(self).__name__, type(value).__name__))
+        super().__init__(value)
 
 
 class Chars16TextRecord(Chars8TextRecord):
@@ -635,6 +641,12 @@ class Bytes8TextRecord(_LengthPrefixedText):
     'YWJj'
     """
     type = 0x9E
+
+    def __init__(self, value):
+        if not isinstance(value, (bytes, bytearray, memoryview)):
+            raise TypeError('%s value must be bytes, not %s'
+                            % (type(self).__name__, type(value).__name__))
+        super().__init__(value)
 
     def __str__(self):
         return base64.b64encode(self.value).decode()
