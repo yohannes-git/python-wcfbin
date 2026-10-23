@@ -38,6 +38,7 @@ from wcf.records.attributes import *
 from wcf.records.elements import *
 
 import functools
+import itertools
 import re
 
 from wcf.dictionary import dictionary
@@ -124,10 +125,25 @@ def _comment(record):
     return '<!--%s-->' % _escape(record.comment, {})
 
 
-def _render_nodes(records):
+_END = object()
+
+
+def render_xml(records):
+    """Produce XML without introducing whitespace or altering text values.
+
+    Iterative, so that the depth of a tree is not limited by the
+    interpreter recursion limit.
+    """
     parts = []
-    for r in records:
-        if isinstance(r, ArrayRecord):
+    stack = [(iter(records), None)]  # (siblings, end tag of their parent)
+    while stack:
+        siblings, end_tag = stack[-1]
+        r = next(siblings, _END)
+        if r is _END:
+            stack.pop()
+            if end_tag is not None:
+                parts.append(end_tag)
+        elif isinstance(r, ArrayRecord):
             name = _name(r.element)
             attrs = ''.join(_attr(a) for a in r.element.attributes + r.attributes)
             for value in r.data:
@@ -138,8 +154,7 @@ def _render_nodes(records):
             name = _name(r)
             parts.append('<%s%s>' % (
                 name, ''.join(_attr(a) for a in r.attributes)))
-            parts.append(_render_nodes(r.childs))
-            parts.append('</%s>' % name)
+            stack.append((iter(r.childs), '</%s>' % name))
         elif isinstance(r, CommentRecord):
             parts.append(_comment(r))
         elif isinstance(r, EndListTextRecord):
@@ -149,11 +164,6 @@ def _render_nodes(records):
         else:
             raise ValueError('Cannot render record %s as XML' % type(r).__name__)
     return ''.join(parts)
-
-
-def render_xml(records):
-    """Produce XML without introducing whitespace or altering text values."""
-    return _render_nodes(records)
 
 
 def print_records(records, skip=0, fp=None, first_call=True):
@@ -182,24 +192,30 @@ def dump_records(records):
     Closure style decoded from wire is retained: explicit EndElement (0x01)
     remains explicit, and TextWithEndElement remains implicit. Newly created
     trees use TextWithEndElement for their final text child by default.
+    Iterative, like render_xml().
     """
     out = bytearray()
-    for record in records:
-        if isinstance(record, Element) and not isinstance(record, EndElementRecord):
+    stack = [(iter(records), None)]  # (siblings, bytes closing their parent)
+    while stack:
+        siblings, closing = stack[-1]
+        record = next(siblings, _END)
+        if record is _END:
+            stack.pop()
+            if closing is not None:
+                out.extend(closing)
+        elif isinstance(record, Element) and not isinstance(record, EndElementRecord):
             out.extend(record.to_bytes())
             children = getattr(record, 'childs', [])
             implicit = (bool(children) and isinstance(children[-1], Text) and
                         children[-1].type not in (0xA4, 0xA6) and
                         getattr(record, '_wcf_closure', None) != 'explicit')
             if implicit:
-                out.extend(dump_records(children[:-1]))
-                last = children[-1]
-                value = last.to_bytes()
-                out.append(last.type + 1)
-                out.extend(value[1:])
+                # the last text record becomes its *WithEndElement form
+                value = children[-1].to_bytes()
+                stack.append((itertools.islice(children, len(children) - 1),
+                              bytes((value[0] + 1,)) + value[1:]))
             else:
-                out.extend(dump_records(children))
-                out.append(EndElementRecord.type)
+                stack.append((iter(children), bytes((EndElementRecord.type,))))
         else:
             out.extend(record.to_bytes())
     return bytes(out)

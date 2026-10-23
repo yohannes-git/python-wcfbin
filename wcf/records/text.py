@@ -98,6 +98,7 @@ from wcf.dictionary import dictionary
 
 class ZeroTextRecord(Text):
     type = 0x80
+    max_chars = 1  # longest rendering
 
     def __str__(self):
         return '0'
@@ -109,6 +110,7 @@ class ZeroTextRecord(Text):
 
 class OneTextRecord(Text):
     type = 0x82
+    max_chars = 1  # longest rendering
 
     def __str__(self):
         return '1'
@@ -120,6 +122,7 @@ class OneTextRecord(Text):
 
 class FalseTextRecord(Text):
     type = 0x84
+    max_chars = 5  # longest rendering
 
     def __str__(self):
         return 'false'
@@ -131,6 +134,7 @@ class FalseTextRecord(Text):
 
 class TrueTextRecord(Text):
     type = 0x86
+    max_chars = 4  # longest rendering
 
     def __str__(self):
         return 'true'
@@ -142,6 +146,7 @@ class TrueTextRecord(Text):
 
 class Int8TextRecord(Text):
     type = 0x88
+    max_chars = 4  # longest rendering
 
     def __init__(self, value):
         self.value = value
@@ -174,6 +179,7 @@ class Int8TextRecord(Text):
 
 class Int16TextRecord(Int8TextRecord):
     type = 0x8A
+    max_chars = 6  # longest rendering
 
     def to_bytes(self):
         r"""
@@ -196,6 +202,7 @@ class Int16TextRecord(Int8TextRecord):
 
 class Int32TextRecord(Int8TextRecord):
     type = 0x8C
+    max_chars = 11  # longest rendering
 
     def to_bytes(self):
         r"""
@@ -218,6 +225,7 @@ class Int32TextRecord(Int8TextRecord):
 
 class Int64TextRecord(Int8TextRecord):
     type = 0x8E
+    max_chars = 20  # longest rendering
 
     def to_bytes(self):
         r"""
@@ -240,6 +248,7 @@ class Int64TextRecord(Int8TextRecord):
 
 class UInt64TextRecord(Int64TextRecord):
     type = 0xB2
+    max_chars = 20  # longest rendering
 
     def to_bytes(self):
         r"""
@@ -262,6 +271,7 @@ class UInt64TextRecord(Int64TextRecord):
 
 class BoolTextRecord(Text):
     type = 0xB4
+    max_chars = 5  # longest rendering
 
     def __init__(self, value):
         self.value = value
@@ -413,6 +423,7 @@ class QNameDictionaryTextRecord(Text):
 
 class FloatTextRecord(Text):
     type = 0x90
+    max_chars = 15  # longest rendering
 
     def __init__(self, value):
         self.value = value
@@ -451,6 +462,7 @@ class FloatTextRecord(Text):
 
 class DoubleTextRecord(FloatTextRecord):
     type = 0x92
+    max_chars = 24  # longest rendering
 
     def __init__(self, value):
         self.value = value
@@ -489,6 +501,7 @@ class DoubleTextRecord(FloatTextRecord):
 
 class DecimalTextRecord(Text):
     type = 0x94
+    max_chars = 31  # longest rendering
 
     def __init__(self, value):
         self.value = value
@@ -522,6 +535,7 @@ class DecimalTextRecord(Text):
 
 class DatetimeTextRecord(Text):
     type = 0x96
+    max_chars = 33  # longest rendering
 
     def __init__(self, value, tz):
         self.value = value
@@ -695,6 +709,7 @@ class Chars32TextRecord(Chars8TextRecord):
 
 class UniqueIdTextRecord(Text):
     type = 0xAC
+    max_chars = 45  # longest rendering
 
     def __init__(self, *args, **kwargs):
         self.uuid = uuid.UUID(*args, **kwargs)
@@ -731,6 +746,7 @@ class UniqueIdTextRecord(Text):
 
 class UuidTextRecord(UniqueIdTextRecord):
     type = 0xB0
+    max_chars = 36  # longest rendering
 
     def __str__(self):
         """
@@ -869,16 +885,20 @@ class StartListTextRecord(Text):
             item_cls = Record.records.get(code)
             if item_cls is None or not issubclass(item_cls, Text) or code in (cls.type, EndListTextRecord.type):
                 raise ValueError('Invalid record 0x%02X inside a WCF text list' % code)
-            values.append(item_cls.parse(fp))
+            item = item_cls.parse(fp)
+            charge(1, text_chars(item) + 1)  # and its separator
+            values.append(item)
         return cls(values)
 
 
 class EndListTextRecord(Text):
     type = 0xA6
+    max_chars = 0  # longest rendering
 
 
 class EmptyTextRecord(Text):
     type = 0xA8
+    max_chars = 0  # longest rendering
 
     def __str__(self):
         return ''
@@ -886,6 +906,7 @@ class EmptyTextRecord(Text):
 
 class TimeSpanTextRecord(Text):
     type = 0xAE
+    max_chars = 27  # longest rendering
 
     def __init__(self, value):
         self.value = value

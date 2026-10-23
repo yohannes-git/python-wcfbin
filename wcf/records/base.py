@@ -30,10 +30,83 @@
 
 import struct
 import logging
+from contextvars import ContextVar
 
 from wcf.datatypes import *
 
 log = logging.getLogger(__name__)
+
+
+class Quotas(object):
+    """Limits on the decoding of one document.
+
+    MC-NBFX and MC-NBFSE (section 4) ask consumers to guard against
+    documents that cost far more than their size: a two-byte
+    DictionaryText can stand for a long dictionary string, every record
+    becomes an object, and nesting has no bound. These quotas play the
+    role of .NET's XmlDictionaryReaderQuotas; a document exceeding one
+    is refused with ValueError while it is being parsed.
+
+    max_depth:   maximum element nesting (MaxDepth).
+    max_records: maximum number of records, every attribute, list item
+                 and array item counted.
+    max_chars:   maximum number of characters the document represents:
+                 names, prefixes, namespace URIs, comments and values,
+                 dictionary strings expanded and array items repeated;
+                 this bounds the size of render_xml()'s output.
+
+    None disables a limit.
+    """
+
+    def __init__(self, max_depth=64, max_records=200000,
+                 max_chars=16 * 1024 * 1024):
+        self.max_depth = max_depth
+        self.max_records = max_records
+        self.max_chars = max_chars
+
+    def __repr__(self):
+        return 'Quotas(max_depth=%r, max_records=%r, max_chars=%r)' % (
+            self.max_depth, self.max_records, self.max_chars)
+
+
+DEFAULT_QUOTAS = Quotas()
+NO_QUOTAS = Quotas(None, None, None)
+
+
+class _Budget(object):
+    """What the document being decoded has used of its quotas."""
+
+    __slots__ = ('quotas', 'records', 'chars')
+
+    def __init__(self, quotas):
+        self.quotas = quotas
+        self.records = 0
+        self.chars = 0
+
+    def charge(self, records, chars):
+        self.records += records
+        self.chars += chars
+        quotas = self.quotas
+        if quotas.max_records is not None and self.records > quotas.max_records:
+            raise ValueError('MC-NBFX document exceeds the quota of %d records'
+                             % quotas.max_records)
+        if quotas.max_chars is not None and self.chars > quotas.max_chars:
+            raise ValueError('MC-NBFX document exceeds the quota of %d characters'
+                             % quotas.max_chars)
+
+
+_budget = ContextVar('wcf_decoding_budget', default=None)
+
+
+def charge(records, chars):
+    """Account for records about to be created by the parse in progress.
+
+    Array and list items are charged before they are read, so that a
+    count that exceeds a quota is refused before anything is allocated.
+    """
+    budget = _budget.get()
+    if budget is not None:
+        budget.charge(records, chars)
 
 
 class Record(object):
@@ -70,8 +143,12 @@ class Record(object):
         return '<%s(%s)>' % (type(self).__name__, ','.join(args))
 
     @classmethod
-    def parse(cls, fp):
+    def parse(cls, fp, quotas=DEFAULT_QUOTAS):
         r"""Parse a WCF Binary XML document, preserving element closure records.
+
+        The document is refused with ValueError when it exceeds one of
+        the ``quotas`` (DEFAULT_QUOTAS unless given, NO_QUOTAS for
+        trusted input only).
 
         >>> from wcf.records import dump_records
         >>> from io import BytesIO
@@ -82,6 +159,14 @@ class Record(object):
         if cls is not Record:
             return cls()
 
+        token = _budget.set(_Budget(quotas))
+        try:
+            return cls._parse_document(fp, quotas.max_depth)
+        finally:
+            _budget.reset(token)
+
+    @classmethod
+    def _parse_document(cls, fp, max_depth):
         root = []
         records = root
         parents = []  # pairs of (container, open element)
@@ -94,7 +179,7 @@ class Record(object):
             if recordtype in Record.records:
                 recordclass = Record.records[recordtype]
                 obj = recordclass.parse(fp)
-                _validate_dictionary_references(obj)
+                _charge_record(obj)
                 if isinstance(obj, EndElementRecord):
                     if not parents:
                         raise ValueError('Unexpected EndElement')
@@ -102,6 +187,9 @@ class Record(object):
                     closed._wcf_closure = 'explicit'
                     open_element = parents[-1][1] if parents else None
                 elif isinstance(obj, Element):
+                    if max_depth is not None and len(parents) >= max_depth:
+                        raise ValueError('MC-NBFX document nested deeper than %d'
+                                         % max_depth)
                     records.append(obj)
                     obj.childs = []
                     parents.append((records, obj))
@@ -122,7 +210,7 @@ class Record(object):
                 if not parents:
                     raise ValueError('TextWithEndElement outside an element')
                 obj = Record.records[recordtype - 1].parse(fp)
-                _validate_dictionary_references(obj)
+                _charge_record(obj)
                 records.append(obj)
                 records, closed = parents.pop()
                 closed._wcf_closure = 'implicit'
@@ -326,6 +414,14 @@ class ArrayRecord(Record):
         count = MultiByteInt31.parse(fp).value
         if count == 0:
             raise ValueError('ArrayRecord length cannot be zero')
+        # every item stands for <name attributes>value</name>
+        item_records, item_chars = 1, (2 * _name_chars(element) +
+                                       Record.records[recordtype - 1].max_chars)
+        for attribute in attributes:
+            records, chars = _attribute_cost(attribute)
+            item_records += records
+            item_chars += chars
+        charge(count * item_records, count * item_chars)
         data = []
         for i in range(count):
             data.append(Record.records[recordtype-1].parse(fp))
@@ -349,27 +445,65 @@ class ArrayRecord(Record):
 
 
 
-def _validate_dictionary_references(record):
-    """Reject dictionary indices not defined in static/session dictionaries.
-
-    Element constructors already resolve their IDs, but attribute and text
-    records historically deferred lookup to ``str``/rendering.  Accepting an
-    unknown ID as a parsed record would make decoding depend on later state.
-    """
+def _dictionary_chars(index):
+    """Length of a dictionary string; resolving it also rejects an id
+    that is in neither the static nor the session dictionary, so that a
+    decoded tree never depends on a later session state."""
     from wcf.dictionary import dictionary
-    if isinstance(record, Record) and hasattr(record, 'index'):
-        dictionary[record.index]
-    if isinstance(record, ArrayRecord):
-        _validate_dictionary_references(record.element)
-        for attr in record.attributes:
-            _validate_dictionary_references(attr)
-        for value in record.data:
-            _validate_dictionary_references(value)
-    elif isinstance(record, Attribute) and hasattr(record, 'value'):
-        _validate_dictionary_references(record.value)
-    elif isinstance(record, Text) and hasattr(record, 'values'):
-        for value in record.values:
-            _validate_dictionary_references(value)
+    return len(dictionary[index])
+
+
+def text_chars(record):
+    """The number of characters a text record represents, or an upper
+    bound of it for the fixed-size types (their max_chars)."""
+    count = getattr(record, 'max_chars', None)
+    if count is not None:
+        return count
+    if hasattr(record, 'index'):
+        # DictionaryText, QNameDictionaryText ("p:" + name)
+        return _dictionary_chars(record.index) + (2 if hasattr(record, 'prefix') else 0)
+    value = getattr(record, 'value', None)
+    if isinstance(value, str):
+        return len(value)
+    if isinstance(value, (bytes, bytearray)):
+        return 4 * ((len(value) + 2) // 3)  # base64
+    return 0  # StartListText: its items are charged as they are read
+
+
+def _name_chars(record):
+    """Characters of the names, prefix and namespace URI of an element
+    or attribute record (XmlnsAttribute.name is its prefix)."""
+    count = 0
+    for field in ('prefix', 'name'):
+        value = getattr(record, field, None)
+        if isinstance(value, str):
+            count += len(value)
+    if hasattr(record, 'index') and not isinstance(record, Element):
+        count += _dictionary_chars(record.index)
+    if isinstance(getattr(record, 'value', None), str):
+        count += len(record.value)  # ShortXmlns/Xmlns namespace URI
+    return count
+
+
+def _attribute_cost(record):
+    """(records, characters) of an attribute record and its value."""
+    value = getattr(record, 'value', None)
+    if isinstance(value, Text):
+        return 2, _name_chars(record) + text_chars(value)
+    return 1, _name_chars(record)  # xmlns declaration
+
+
+def _charge_record(record):
+    """Charge a record read by Record.parse (array and list items are
+    charged by their own parse())."""
+    if isinstance(record, Text):
+        charge(1, text_chars(record))
+    elif isinstance(record, Attribute):
+        charge(*_attribute_cost(record))
+    elif isinstance(record, CommentRecord):
+        charge(1, len(record.comment))
+    elif isinstance(record, Element) and not isinstance(record, EndElementRecord):
+        charge(1, _name_chars(record))
 
 
 Record.add_records((EndElementRecord,
