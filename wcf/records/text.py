@@ -67,17 +67,51 @@ def _fraction(ticks):
     return '.' + ('%07d' % ticks).rstrip('0') if ticks else ''
 
 
+# the decimal arithmetic of the rendering, exact whatever the context of
+# the caller (decimal.getcontext().prec = 5 must not round the digits)
+_EXACT = decimal.Context(prec=60, traps=[decimal.Inexact, decimal.InvalidOperation])
+
+
+def _shortest_float32_digits(value, original):
+    """The fewest significant digits that read back as the float32 bits
+    ``original`` (at most nine), the closest to ``value`` if several do."""
+    # 2^n: the values below are twice as close, the correctly rounded
+    # digits can miss where a neighbour of the same length reads back
+    power_of_two = abs(math.frexp(value)[0]) == 0.5
+    for digits in range(1, 10):
+        candidate = '%.*e' % (digits - 1, value)
+        if _reads_back(candidate, original):
+            return candidate
+        if power_of_two:
+            rounded = decimal.Decimal(candidate)
+            ulp = decimal.Decimal(1).scaleb(rounded.adjusted() - digits + 1, _EXACT)
+            for neighbour in (_EXACT.add(rounded, ulp), _EXACT.subtract(rounded, ulp)):
+                if _reads_back(neighbour, original):
+                    return str(neighbour)
+    raise WcfBinaryError('Cannot render MC-NBFX floating-point value')
+
+
+def _reads_back(candidate, original):
+    try:
+        return struct.pack('<f', float(candidate)) == original
+    except OverflowError:
+        return False
+
+
 def _shortest_ieee754_text(value, single_precision):
     """MC-NBFX 2.2.3.9/10: shortest round-trippable decimal representation.
 
-    float32 has at most nine significant decimal digits; float64 has at most
-    seventeen. Compare the *bits* of each round-trip candidate so that this
-    does not accidentally display the expanded float64 approximation of a
-    decoded float32. Do not infer a type from untyped XML input here.
+    The digits are the fewest that give back the same bits, the closest to
+    the value when several do (repr() for a float64). A float32 is not
+    displayed as the expanded float64 approximation of its value. Do not
+    infer a type from untyped XML input here.
     """
     code = '<f' if single_precision else '<d'
-    maximum_digits = 9 if single_precision else 17
-    original = struct.pack(code, value)
+    try:
+        original = struct.pack(code, value)
+    except (struct.error, OverflowError) as error:
+        raise WcfBinaryError('Cannot render MC-NBFX floating-point value '
+                             '%r: %s' % (value, error)) from None
     rounded = struct.unpack(code, original)[0]
     if math.isnan(rounded):
         return 'NaN'
@@ -85,16 +119,8 @@ def _shortest_ieee754_text(value, single_precision):
         return '-INF' if rounded < 0 else 'INF'
     if rounded == 0:
         return '-0' if math.copysign(1.0, rounded) < 0 else '0'
-
-    for digits in range(1, maximum_digits + 1):
-        candidate = format(rounded, '.%dg' % digits)
-        try:
-            if struct.pack(code, float(candidate)) == original:
-                break
-        except (OverflowError, ValueError):
-            continue
-    else:
-        raise WcfBinaryError('Cannot render MC-NBFX floating-point value')
+    candidate = (_shortest_float32_digits(rounded, original) if single_precision
+                 else repr(rounded))
 
     # Choose ordinary decimal only when the point falls within the range of
     # significant digits, or just before it ("0.5": "except when a decimal
@@ -102,7 +128,7 @@ def _shortest_ieee754_text(value, single_precision):
     # precede the decimal point"). Outside that range MC-NBFX requires
     # E[+-]exponent: 100 is "1E+2" (.NET would write "100", the text of
     # 2.2.3.9/2.2.3.10 is followed, no example covers this case).
-    as_decimal = decimal.Decimal(candidate)
+    as_decimal = decimal.Decimal(candidate).normalize(_EXACT)
     negative = as_decimal.is_signed()
     sign, digit_tuple, exponent = as_decimal.as_tuple()
     figures = ''.join(map(str, digit_tuple))

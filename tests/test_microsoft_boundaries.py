@@ -9,6 +9,7 @@ import random
 import struct
 import unittest
 
+from wcf.errors import WcfBinaryError
 from wcf.dictionary import dictionary_context
 from wcf.records import Record, dump_records, render_xml
 from wcf.records.attributes import (
@@ -59,6 +60,42 @@ class TextRepresentations(unittest.TestCase):
                 if 'E' in text:
                     self.assertNotIn('e', text)
                     self.assertRegex(text, r'E[+-]\d+$')
+
+    def test_fewest_digits_at_powers_of_two(self):
+        # below 2^n the values are twice as close: the correctly rounded
+        # digits are not always the fewest that read back
+        self.assertEqual('7.120236347223045E-307', str(DoubleTextRecord(2.0 ** -1017)))
+        self.assertEqual('1.2621775E-29', str(FloatTextRecord(2.0 ** -96)))
+        self.assertEqual('1.5474251E+26', str(FloatTextRecord(2.0 ** 87)))
+        for exponent in range(-1074, 1024):
+            value = 2.0 ** exponent
+            digits = len(repr(value).split('e')[0].replace('.', '').strip('0'))
+            text = str(DoubleTextRecord(value))
+            self.assertEqual(value, float(text))
+            self.assertEqual(digits, len(text.split('E')[0].replace('.', '').strip('0')),
+                             (exponent, text))
+        for exponent in range(-149, 128):
+            for value in (2.0 ** exponent, -2.0 ** exponent):
+                text = str(FloatTextRecord(value))
+                self.assertEqual(struct.pack('<f', value), struct.pack('<f', float(text)))
+
+    def test_independent_of_the_decimal_context(self):
+        import decimal
+        with decimal.localcontext() as context:
+            context.prec = 5
+            context.rounding = decimal.ROUND_DOWN
+            self.assertEqual('0.1234567890123', str(DoubleTextRecord(0.1234567890123)))
+            self.assertEqual('1.2345678', str(FloatTextRecord(1.2345678)))
+            self.assertEqual('1.2621775E-29', str(FloatTextRecord(2.0 ** -96)))
+            self.assertEqual('1E+2', str(DoubleTextRecord(100.0)))
+
+    def test_unrepresentable_value_of_a_hand_made_record(self):
+        for record in (FloatTextRecord(1e300), DoubleTextRecord(10 ** 400)):
+            with self.subTest(record=record):
+                with self.assertRaises(WcfBinaryError):
+                    record.to_bytes()
+                with self.assertRaises(WcfBinaryError):
+                    str(record)
 
     def test_float32_minimal_significand_on_boundary(self):
         # 1.1 requires only two significant digits, even though Python stores
