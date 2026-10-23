@@ -281,8 +281,3 @@ class XMLParser(object):
         p.feed(data)
         return p.close()
 
-
-if __name__ == '__main__':
-    import sys
-    p = XMLParser.parse(sys.stdin.buffer.read())
-    sys.stdout.buffer.write(dump_records(p))

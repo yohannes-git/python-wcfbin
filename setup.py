@@ -1,19 +1,17 @@
-import os
 from setuptools import setup
 
 setup(
-    name = "wcf-binary parser",
-    version = "0.5.3.post2",
-    author = "Timo Schmid",
-    author_email = "tschmid@ernw.de",
-    description = ("A library for transforming wcf-binary data from and to xml"),
-    license = "BSD",
-    keywords = "wcf wcf-binary xml",
-    url = "",
-    packages=['wcf', 'wcf.records', 'tests'],
+    name="wcf-binary parser",
+    version="0.6.0",
+    author="Timo Schmid",
+    author_email="tschmid@ernw.de",
+    description="A library for transforming wcf-binary data from and to xml",
+    license="BSD",
+    keywords="wcf wcf-binary xml",
+    url="",
+    packages=['wcf', 'wcf.records'],
     scripts=['wcf2xml.py', 'xml2wcf.py'],
     long_description="",
-    test_suite="tests.alltests.Suite",
     python_requires=">=3.8",
     classifiers=[
         "Development Status :: 4 - Beta",

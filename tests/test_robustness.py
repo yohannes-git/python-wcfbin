@@ -50,7 +50,7 @@ class RobustnessTests(unittest.TestCase):
     def test_fuzz_random_binary_always_fail_or_byte_preserve(self):
         rng = random.Random(0xABC123)
         for i in range(4000):
-            blob = rng.randbytes(rng.randrange(0, 40))
+            blob = bytes(rng.getrandbits(8) for _ in range(rng.randrange(0, 40)))
             try:
                 records = Record.parse(io.BytesIO(blob))
             except ValueError:

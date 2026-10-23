@@ -41,11 +41,14 @@ def main(argv=None):
     else:
         with open(args.source, 'rb') as fp:
             source = fp.read()
-    if args.nbfse:
-        output = BinaryXmlSession().encode_xml(source, new_strings,
-                                               type_overrides=type_overrides)
-    else:
-        output = dump_records(XMLParser.parse(source, type_overrides=type_overrides))
+    try:
+        if args.nbfse:
+            output = BinaryXmlSession().encode_xml(source, new_strings,
+                                                   type_overrides=type_overrides)
+        else:
+            output = dump_records(XMLParser.parse(source, type_overrides=type_overrides))
+    except ValueError as error:
+        parser.exit(1, '%s: error: %s\n' % (parser.prog, error))
     sys.stdout.buffer.write(output)
 
 
