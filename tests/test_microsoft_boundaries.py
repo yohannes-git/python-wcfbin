@@ -79,11 +79,51 @@ class TextRepresentations(unittest.TestCase):
                 text = str(FloatTextRecord(value))
                 self.assertEqual(struct.pack('<f', value), struct.pack('<f', float(text)))
 
+    def test_float32_literals_are_rounded_once(self):
+        # float() rounds 7.038531E-26 onto the midpoint of two float32,
+        # which float32 would round to the even one: the literal is below
+        # the midpoint, its float32 is 0x15ae43fd
+        from wcf.records.text import float32_bytes
+        from wcf.xml2records import XMLParser
+        for text, bits in (('7.038531E-26', 0x15ae43fd), ('-7.038531E-26', 0x95ae43fd),
+                           ('2.597649786245659342398539593E-11', 0x2de47de0),
+                           ('1.1', 0x3f8ccccd)):
+            with self.subTest(text=text):
+                self.assertEqual(struct.pack('<I', bits), float32_bytes(text))
+                records = XMLParser.parse('<v>%s</v>' % text, type_overrides={'/v': 'float'})
+                self.assertEqual(b'\x90' + struct.pack('<I', bits),
+                                 records[0].childs[0].to_bytes())
+        # just below the midpoint of FLT_MAX and 2^128, which float() reaches
+        midpoint = 2 ** 128 - 2 ** 103
+        for text, bits in (('%d.99' % (midpoint - 1), 0x7f7fffff),
+                           ('-%d.99' % (midpoint - 1), 0xff7fffff),
+                           ('340282356779733661637539385458142568448', 0x7f7fffff)):
+            with self.subTest(text=text):
+                self.assertEqual(struct.pack('<I', bits), float32_bytes(text))
+        # the midpoint itself: to the even 2^128, beyond the range
+        for text in (str(midpoint), '-%d' % midpoint, '1e39', '1e400', '-1e400',
+                     '1' + '0' * 999):
+            with self.subTest(text=text[:20]), self.assertRaises(OverflowError):
+                float32_bytes(text)
+        self.assertEqual(struct.pack('<f', float('inf')), float32_bytes('INF'))
+        # and its shortest text has 7 digits
+        value = struct.unpack('<f', struct.pack('<I', 0x15ae43fd))[0]
+        self.assertEqual('7.038531E-26', str(FloatTextRecord(value)))
+
     def test_independent_of_the_decimal_context(self):
         import decimal
+        from wcf.records.text import float32_bytes
         with decimal.localcontext() as context:
-            context.prec = 5
+            context.prec = 3
             context.rounding = decimal.ROUND_DOWN
+            context.Emin, context.Emax = -5, 5
+            context.capitals = 0
+            for trap in (decimal.FloatOperation, decimal.Inexact, decimal.Rounded):
+                context.traps[trap] = True
+            self.assertEqual(struct.pack('<I', 0x15ae43fd), float32_bytes('7.038531e-26'))
+            self.assertEqual('7.038531E-26', str(FloatTextRecord(
+                struct.unpack('<f', struct.pack('<I', 0x15ae43fd))[0])))
+            self.assertEqual('1.1754944E-38', str(FloatTextRecord(2.0 ** -126)))
             self.assertEqual('0.1234567890123', str(DoubleTextRecord(0.1234567890123)))
             self.assertEqual('1.2345678', str(FloatTextRecord(1.2345678)))
             self.assertEqual('1.2621775E-29', str(FloatTextRecord(2.0 ** -96)))

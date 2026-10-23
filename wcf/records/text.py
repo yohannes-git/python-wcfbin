@@ -43,7 +43,7 @@ from wcf.datatypes import Decimal, mbi31_bytes, read_exact, read_mbi31, read_str
 from wcf.dictionary import dictionary
 from wcf.records.base import Record, Text, charge
 
-__all__ = ['ZeroTextRecord', 'OneTextRecord', 'FalseTextRecord',
+__all__ = ['float32_bytes', 'ZeroTextRecord', 'OneTextRecord', 'FalseTextRecord',
            'TrueTextRecord', 'Int8TextRecord', 'Int16TextRecord',
            'Int32TextRecord', 'Int64TextRecord', 'UInt64TextRecord',
            'BoolTextRecord', 'UnicodeChars8TextRecord',
@@ -91,9 +91,55 @@ def _shortest_float32_digits(value, original):
     raise WcfBinaryError('Cannot render MC-NBFX floating-point value')
 
 
+_FLT_MAX = float.fromhex('0x1.fffffep+127')
+# halfway between FLT_MAX and 2^128, a double
+_FLT_MAX_MIDPOINT = float.fromhex('0x1.ffffffp+127')
+
+
+def float32_bytes(text):
+    """The float32 nearest to a decimal literal, packed: float() then
+    float32 rounds twice, and a literal just below or above the midpoint of
+    two float32 that float() rounds onto it would go to the even one.
+    OverflowError beyond the float32 range.
+
+    >>> float32_bytes('7.038531e-26').hex()   # not 0x15ae43fe
+    'fd43ae15'
+    """
+    value = float(text)
+    if math.isinf(value) and decimal.Decimal(text).is_finite():
+        raise OverflowError('%s is beyond the float32 range' % (text,))
+    try:
+        packed = struct.pack('<f', value)
+    except OverflowError:
+        # a literal just below the midpoint of FLT_MAX and 2^128 that
+        # float() rounded onto it: FLT_MAX, not the even 2^128
+        if abs(value) == _FLT_MAX_MIDPOINT and decimal.Decimal(text).copy_abs() < \
+                decimal.Decimal.from_float(_FLT_MAX_MIDPOINT):
+            return struct.pack('<f', math.copysign(_FLT_MAX, value))
+        raise
+    single = struct.unpack('<f', packed)[0]
+    if single == value or not math.isfinite(single):
+        return packed
+    bits = struct.unpack('<I', packed)[0]
+    # the float32 on the other side of value (bits are sign and magnitude)
+    toward = 1 if abs(value) > abs(single) else -1
+    other_packed = struct.pack('<I', bits + toward)
+    other = struct.unpack('<f', other_packed)[0]
+    if (single + other) / 2 != value:
+        return packed
+    # exact comparisons, Decimal.from_float(): no FloatOperation trap
+    exact = decimal.Decimal(text)
+    rounded = decimal.Decimal.from_float(value)
+    if exact == rounded:
+        return packed   # a true tie: to even, as struct did
+    # the side of the literal, not the even one
+    beyond = exact.copy_abs() > rounded.copy_abs()
+    return other_packed if beyond == (toward == 1) else packed
+
+
 def _reads_back(candidate, original):
     try:
-        return struct.pack('<f', float(candidate)) == original
+        return float32_bytes(candidate) == original
     except OverflowError:
         return False
 

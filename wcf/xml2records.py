@@ -29,6 +29,7 @@ from wcf.records import (
     CommentRecord,
 )
 from wcf.datatypes import Decimal
+from wcf.records.text import float32_bytes
 from wcf.records.attributes import PREFIX_ATTRIBUTES, PREFIX_DICTIONARY_ATTRIBUTES
 from wcf.records.elements import PREFIX_ELEMENTS, PREFIX_DICTIONARY_ELEMENTS
 
@@ -147,9 +148,11 @@ def _typed_text(value, kind):
             # (a float rounds to float32, as .NET's float.MaxValue written
             # "3.40282347E+38" does)
             try:
-                if math.isinf(n) or kind == 'float' and math.isinf(
-                        struct.unpack('<f', struct.pack('<f', n))[0]):
+                if math.isinf(n):
                     raise OverflowError
+                if kind == 'float':
+                    # rounded once, to the nearest float32
+                    n = struct.unpack('<f', float32_bytes(stripped))[0]
             except OverflowError:
                 raise WcfBinaryError('%s out of range: %r' % (kind, value)) from None
         else:

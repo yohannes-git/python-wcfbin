@@ -41,6 +41,8 @@ New:
 * `wcf.errors.WcfBinaryError`, `wcf.dictionary.UnknownDictionaryId`.
 * `wcf.xmltext`: XML names, escaping and comments.
 * `wcf.datatypes.Decimal.from_string()`.
+* `wcf.records.text.float32_bytes()`: the float32 nearest to a decimal
+  literal, rounded once.
 * `wcf2xml.py --no-quotas`; `--nbfse` for both scripts.
 
 See README.md for the deviations from the text of the specification.
