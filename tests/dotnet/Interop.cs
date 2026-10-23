@@ -123,7 +123,7 @@ namespace TisInterop
                 m = Message.CreateMessage(MessageVersion.Soap12WSAddressing10, "urn:tis:interop/Extra",
                                           SampleExtra(i), new DataContractSerializer(typeof(Extra)));
             }
-            m.Headers.RelatesTo = new UniqueId(new Guid("4e1e8f3e-4a3a-4a2b-9e5c-7d9a1f1b2c3" + i.ToString()));
+            m.Headers.RelatesTo = new UniqueId(new Guid(string.Format("4e1e8f3e-4a3a-4a2b-9e5c-{0:x12}", i)));
             return m;
         }
 
@@ -187,7 +187,7 @@ namespace TisInterop
             var m = Message.CreateMessage(MessageVersion.Soap12WSAddressing10, "urn:tis:interop/Action", obj,
                                           new DataContractSerializer(typeof(All)));
             m.Headers.To = new Uri("net.tcp://dc.example:9389/Service");
-            m.Headers.MessageId = new UniqueId(new Guid("4e1e8f3e-4a3a-4a2b-9e5c-7d9a1f1b2c3" + i.ToString()));
+            m.Headers.MessageId = new UniqueId(new Guid(string.Format("4e1e8f3e-4a3a-4a2b-9e5c-{0:x12}", i)));
             return m;
         }
 
