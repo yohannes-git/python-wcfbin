@@ -57,6 +57,7 @@ __all__ = ['ZeroTextRecord', 'OneTextRecord', 'FalseTextRecord',
 TICKS_PER_SECOND = 10000000          # 100 ns
 TICKS_PER_DAY = 86400 * TICKS_PER_SECOND
 MAX_DATETIME_TICKS = 3155378976000000000  # 10000-01-01T00:00:00
+TICKS_CEILING = 1 << 62  # the 62-bit DateTime field
 
 
 def _fraction(ticks):
@@ -490,14 +491,31 @@ class DecimalTextRecord(Text):
         return cls(value)
 
 
-class DatetimeTextRecord(Text):
-    """``value``: 100 ns ticks since 0001-01-01, ``tz``: 0 unspecified,
-    1 UTC, 2 local (MC-NBFX 2.2.3.12).
+def _local_utc_offset(utc_ticks):
+    """The UTC offset (in ticks) of the decoding host at a UTC time, or its
+    current offset where the host cannot compute it (near year 1 or 9999)."""
+    utc = datetime.datetime(1, 1, 1, tzinfo=datetime.timezone.utc) + \
+        datetime.timedelta(microseconds=utc_ticks // 10)
+    try:
+        offset = utc.astimezone().utcoffset()
+    except (OverflowError, OSError, ValueError):
+        offset = datetime.datetime.now().astimezone().utcoffset()
+    return offset // datetime.timedelta(microseconds=1) * 10
 
-    A local time is taken as the text of 2.2.3.12 describes it: the ticks
-    are the local time and the offset of the decoding host is appended.
-    .NET (DateTime.ToBinary()) stores the UTC ticks of a local time
-    instead; no example of the specification covers that case.
+
+class DatetimeTextRecord(Text):
+    """``value``: the 62-bit field; ``tz``: 0 unspecified, 1 UTC, 2 local
+    (MC-NBFX 2.2.3.12).
+
+    For tz 0 and 1, ``value`` is the ticks (100 ns) since 0001-01-01 of the
+    date. For a local time, it is what .NET's DateTime.ToBinary() writes
+    and FromBinary() reads, .NET being the producer of these records: the
+    ticks of the UTC time, a time before 0001-01-01T00:00:00Z being stored
+    below TICKS_CEILING. It is rendered as the local time of the decoding
+    host with its offset (2.2.3.12: "The UTC offset MUST be the time zone
+    offset in which the document is being decoded"). Taking the field as
+    the local time itself shifts the values of .NET by the offset
+    (checked against .NET Framework 4.8.1).
     """
     type = 0x96
     max_chars = 33
@@ -507,9 +525,24 @@ class DatetimeTextRecord(Text):
         self.tz = tz
 
     def _check(self):
-        if self.tz not in (0, 1, 2) or not 0 <= self.value < MAX_DATETIME_TICKS:
+        limit = TICKS_CEILING if self.tz == 2 else MAX_DATETIME_TICKS
+        if self.tz not in (0, 1, 2) or not 0 <= self.value < limit:
             raise WcfBinaryError('Invalid MC-NBFX DateTimeText value %r or time zone %r'
-                             % (self.value, self.tz))
+                                 % (self.value, self.tz))
+
+    def _local(self):
+        """(ticks, UTC offset in ticks) of a local time, as
+        DateTime.FromBinary() computes them."""
+        ticks = self.value
+        if ticks > TICKS_CEILING - TICKS_PER_DAY:
+            ticks -= TICKS_CEILING  # before 0001-01-01T00:00:00Z
+        offset = _local_utc_offset(min(max(ticks, 0), MAX_DATETIME_TICKS - 1))
+        ticks += offset
+        if ticks < 0:
+            ticks += TICKS_PER_DAY  # as .NET does
+        if not 0 <= ticks < MAX_DATETIME_TICKS:
+            raise WcfBinaryError('MC-NBFX DateTimeText local time out of range')
+        return ticks, offset
 
     def __str__(self):
         """DateTimeText lexical format (MC-NBFX 2.2.3.12).
@@ -520,29 +553,20 @@ class DatetimeTextRecord(Text):
         do not.
         """
         self._check()
-        days, rem = divmod(self.value, TICKS_PER_DAY)
-        seconds, ticks = divmod(rem, TICKS_PER_SECOND)
+        ticks, offset = self._local() if self.tz == 2 else (self.value, 0)
+        days, rem = divmod(ticks, TICKS_PER_DAY)
+        seconds, fraction = divmod(rem, TICKS_PER_SECOND)
         dt = (datetime.datetime(1, 1, 1) +
               datetime.timedelta(days=days, seconds=seconds))
         text = '%04d-%02d-%02dT%02d:%02d:%02d' % (
             dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second)
-        text += _fraction(ticks)
+        text += _fraction(fraction)
         if self.tz == 1:
             text += 'Z'
         elif self.tz == 2:
-            # MC-NBFX explicitly requires the offset of the decoding host:
-            # the one in effect at that date when the host can compute it
-            # (as .NET's TimeZoneInfo.Local.GetUtcOffset), the current one
-            # near the ends of the range (e.g. DateTime.MaxValue), where
-            # converting to local time leaves years 1-9999.
-            try:
-                offset = dt.astimezone().utcoffset()
-            except (OverflowError, OSError, ValueError):
-                offset = datetime.datetime.now().astimezone().utcoffset()
-            offset_minutes = offset // datetime.timedelta(minutes=1)
-            absolute = abs(offset_minutes)
-            text += '%s%02d:%02d' % ('+' if offset_minutes >= 0 else '-',
-                                    absolute // 60, absolute % 60)
+            minutes = offset // (60 * TICKS_PER_SECOND)
+            text += '%s%02d:%02d' % ('+' if minutes >= 0 else '-',
+                                    abs(minutes) // 60, abs(minutes) % 60)
         return text
 
     def to_bytes(self):

@@ -5,6 +5,9 @@ complete WCF/.NET interoperability or MC-NBFSE certification suite.
 """
 
 import io
+import os
+import subprocess
+import sys
 import re
 import unittest
 from xml.etree import ElementTree as ET
@@ -256,23 +259,39 @@ class BinaryFidelity(unittest.TestCase):
         self.assertEqual('-P10675199DT2H48M5.4775808S',
                          str(TimeSpanTextRecord(-(1 << 63))))
 
-    def test_datetime_local_at_the_ends_of_the_range(self):
-        # DateTime.MinValue and MaxValue with Kind=Local
-        for ticks, date in ((0, '0001-01-01T00:00:00'), (3155378975999999999,
-                                                '9999-12-31T23:59:59.9999999')):
-            with self.subTest(ticks=ticks):
-                self.assertRegex(str(DatetimeTextRecord(ticks, 2)),
-                                 '^' + re.escape(date) + r'[+-]\d\d:\d\d$')
-
     def test_datetime_preserves_100_ns_and_utc(self):
         self.assertEqual('0001-01-01T00:00:00.0000001',
                          str(DatetimeTextRecord(1, 0)))
         self.assertEqual('1970-01-01T00:00:00.0000001Z',
                          str(DatetimeTextRecord(621355968000000001, 1)))
 
-    def test_datetime_local_uses_offset(self):
-        self.assertRegex(str(DatetimeTextRecord(621355968000000001, 2)),
-                         r'^1970-01-01T00:00:00\.0000001[+-][0-9]{2}:[0-9]{2}$')
+    def local_times(self, tz, values):
+        """str() of local DateTimeText records in a host whose time zone is
+        the fixed offset tz (POSIX TZ syntax, e.g. "XST-02" is +02:00)."""
+        code = ('import sys; from wcf.records import DatetimeTextRecord\n'
+                'for v in %r:\n'
+                '    try: print(DatetimeTextRecord(v, 2))\n'
+                '    except ValueError as e: print(type(e).__name__)' % (values,))
+        out = subprocess.run([sys.executable, '-c', code], capture_output=True,
+                             env=dict(os.environ, TZ=tz), check=True)
+        return out.stdout.decode().split()
+
+    def test_datetime_local_as_dotnet_from_binary(self):
+        # the field holds the UTC ticks (DateTime.ToBinary()), rendered as
+        # the local time of the decoding host with its offset
+        ceiling, hour = 1 << 62, 3600 * 10 ** 7
+        utc = 632834208000000000 + (8 * 3600 + 20 * 60 + 30) * 10 ** 7 + 1230000
+        max_ticks = 3155378976000000000
+        self.assertEqual([
+            '2006-05-17T10:20:30.123+02:00',      # 08:20:30.123Z
+            '0001-01-01T01:00:00+02:00',          # -1 h UTC, stored folded
+            '9999-12-31T23:59:59.9999999+02:00',  # DateTime.MaxValue
+            'WcfBinaryError',                     # beyond 9999-12-31 once local
+        ], self.local_times('XST-02', [utc, ceiling - hour,
+                                       max_ticks - 1 - 2 * hour, max_ticks - 1]))
+        # a small time below 0001-01-01 wraps around in the day, as .NET does
+        self.assertEqual(['0001-01-01T21:00:00-05:00', '2006-05-17T03:20:30.123-05:00'],
+                         self.local_times('XST+05', [2 * hour, utc]))
 
     def test_decimal_less_than_one(self):
         self.assertEqual('0.001', str(Decimal(False, 0, 1, 3)))
