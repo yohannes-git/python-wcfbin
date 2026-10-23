@@ -30,8 +30,8 @@
 
 from wcf.datatypes import mbi31_bytes, read_mbi31, read_utf8, utf8_bytes
 from wcf.dictionary import dictionary
-from wcf.records.base import (Attribute, Record, _DictionaryName, _NamedRecord,
-                              letter_records, read_attribute_text,
+from wcf.records.base import (Attribute, LetterPrefix, Record, _DictionaryName,
+                              _NamedRecord, letter_records, read_attribute_text,
                               validate_attribute_text, validate_xml_name)
 
 __all__ = ['ShortAttributeRecord', 'AttributeRecord',
@@ -108,17 +108,17 @@ class DictionaryAttributeRecord(ShortDictionaryAttributeRecord):
     _has_prefix = True
 
 
-class PrefixAttributeRecord(AttributeRecord):
+class PrefixAttributeRecord(LetterPrefix, AttributeRecord):
     """Prefix a to z, from the record type.
 
     >>> from wcf.records import TrueTextRecord
     >>> PrefixAttributeARecord('name', TrueTextRecord()).to_bytes()
     b'&\\x04name\\x86'
     """
-    _has_prefix = False
+    type = None
 
 
-class PrefixDictionaryAttributeRecord(DictionaryAttributeRecord):
+class PrefixDictionaryAttributeRecord(LetterPrefix, DictionaryAttributeRecord):
     """Prefix a to z, from the record type.
 
     >>> from wcf.records import TrueTextRecord
@@ -128,7 +128,7 @@ class PrefixDictionaryAttributeRecord(DictionaryAttributeRecord):
     >>> str(PrefixDictionaryAttributeBRecord.parse(BytesIO(b'\\x02\\x86')))
     'b:Envelope="true"'
     """
-    _has_prefix = False
+    type = None
 
 
 class ShortXmlnsAttributeRecord(Attribute):
@@ -164,6 +164,10 @@ class ShortXmlnsAttributeRecord(Attribute):
     @property
     def namespace(self):
         return dictionary[self.index] if self._by_index else self.value
+
+    @property
+    def qname(self):
+        return 'xmlns' if self.prefix is None else 'xmlns:' + self.prefix
 
     def to_bytes(self):
         out = bytearray((self.type,))

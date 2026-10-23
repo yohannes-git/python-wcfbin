@@ -28,7 +28,8 @@
 #  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """Element records (MC-NBFX 2.2.1)."""
 
-from wcf.records.base import Element, Record, _DictionaryName, _NamedRecord, letter_records
+from wcf.records.base import (Element, LetterPrefix, Record, _DictionaryName,
+                              _NamedRecord, letter_records)
 
 __all__ = ['ShortElementRecord', 'ElementRecord', 'ShortDictionaryElementRecord',
            'DictionaryElementRecord', 'PrefixElementRecord',
@@ -102,7 +103,7 @@ class DictionaryElementRecord(ShortDictionaryElementRecord):
     _has_prefix = True
 
 
-class PrefixElementRecord(ElementRecord):
+class PrefixElementRecord(LetterPrefix, ElementRecord):
     """Prefix a to z, from the record type.
 
     >>> PrefixElementARecord('test').to_bytes()
@@ -111,10 +112,10 @@ class PrefixElementRecord(ElementRecord):
     >>> str(PrefixElementARecord.parse(BytesIO(b'\\x04test')))
     '<a:test>'
     """
-    _has_prefix = False
+    type = None
 
 
-class PrefixDictionaryElementRecord(DictionaryElementRecord):
+class PrefixDictionaryElementRecord(LetterPrefix, DictionaryElementRecord):
     """Prefix a to z, from the record type.
 
     >>> PrefixDictionaryElementARecord(2).to_bytes()
@@ -123,7 +124,7 @@ class PrefixDictionaryElementRecord(DictionaryElementRecord):
     >>> str(PrefixDictionaryElementSRecord.parse(BytesIO(b'\\x02')))
     '<s:Envelope>'
     """
-    _has_prefix = False
+    type = None
 
 
 Record.add_records((ShortElementRecord, ElementRecord,

@@ -62,6 +62,25 @@ class ConstructorTests(unittest.TestCase):
         finally:
             Record.records[0x98] = original
 
+    def test_letter_prefix_records(self):
+        from wcf.records import (PrefixElementARecord, PrefixElementRecord,
+                                 PrefixDictionaryElementRecord, PrefixAttributeRecord,
+                                 PrefixDictionaryAttributeRecord, TrueTextRecord)
+        record = PrefixElementARecord('x')
+        self.assertEqual('a', record.prefix)
+        with self.assertRaises(AttributeError):
+            record.prefix = 'b'  # the letter is the record type
+        for base, args in ((PrefixElementRecord, ('x',)),
+                           (PrefixDictionaryElementRecord, (2,)),
+                           (PrefixAttributeRecord, ('x', TrueTextRecord())),
+                           (PrefixDictionaryAttributeRecord, (2, TrueTextRecord()))):
+            with self.subTest(base=base.__name__), self.assertRaises(TypeError):
+                base(*args)
+
+    def test_xmlns_qname(self):
+        self.assertEqual('xmlns', ShortXmlnsAttributeRecord('urn:a').qname)
+        self.assertEqual('xmlns:a', XmlnsAttributeRecord('a', 'urn:a').qname)
+
     def test_parse_returns_the_subclass(self):
         class MyDateTime(DatetimeTextRecord):
             pass

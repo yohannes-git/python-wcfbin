@@ -406,6 +406,25 @@ class _NamedRecord(Record):
         return names
 
 
+class LetterPrefix(object):
+    """Mixin of the Prefix* records, whose prefix is a letter a to z given
+    by their record type: ``char`` (set on the 26 classes letter_records()
+    makes), read-only ``prefix``. The bases (no letter, no record type of
+    their own) cannot be instantiated."""
+    char = None
+    _has_prefix = False
+
+    def __init__(self, *args):
+        if self.char is None:
+            raise TypeError('%s is the base of the 26 records of a letter; use '
+                            'one of them' % type(self).__name__)
+        super().__init__(*args)
+
+    @property
+    def prefix(self):
+        return self.char
+
+
 def letter_records(base, first_type, name_format, namespace):
     """Define the 26 classes of ``base`` whose prefix is the letter of
     their record type (first_type for "a" to first_type + 25 for "z") in
@@ -415,7 +434,7 @@ def letter_records(base, first_type, name_format, namespace):
     for i, letter in enumerate(string.ascii_lowercase):
         name = name_format % letter.upper()
         classes[letter] = type(name, (base,), {
-            'type': first_type + i, 'prefix': letter, 'char': letter,
+            'type': first_type + i, 'char': letter,
             '__module__': namespace['__name__'], '__qualname__': name})
     namespace.update((c.__name__, c) for c in classes.values())
     namespace['__all__'].extend(c.__name__ for c in classes.values())
