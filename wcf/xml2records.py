@@ -329,4 +329,3 @@ class XMLParser(object):
         p = cls(type_overrides=type_overrides, dictionary_text=dictionary_text)
         p.feed(data)
         return p.close()
-
