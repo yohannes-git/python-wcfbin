@@ -44,6 +44,24 @@ class ConstructorTests(unittest.TestCase):
                 make()
         self.assertEqual(b'\x9e\x02ab', Bytes8TextRecord(bytearray(b'ab')).to_bytes())
 
+    def test_replaced_record_class_is_used_everywhere(self):
+        # no cache of the record types: a class replaced in the registry
+        # decodes element content and attribute values alike
+        from wcf.records import Record
+
+        class MyChars(Chars8TextRecord):
+            pass
+        Record.parse(io.BytesIO(b'\x40\x01a\x98\x01x\x01'))  # warm up
+        original = Record.records[0x98]
+        Record.records[0x98] = MyChars
+        try:
+            element = Record.parse(io.BytesIO(
+                b'\x40\x01a\x04\x01b\x98\x01v\x98\x01x\x01'))[0]
+            self.assertIs(MyChars, type(element.childs[0]))
+            self.assertIs(MyChars, type(element.attributes[0].value))
+        finally:
+            Record.records[0x98] = original
+
     def test_parse_returns_the_subclass(self):
         class MyDateTime(DatetimeTextRecord):
             pass

@@ -59,7 +59,6 @@ R.dump_records = dump_records
 class Result(unittest.TextTestResult):
     def startTest(self, test):
         current[0] = test.id()
-        base._KINDS.clear()  # resolve the record types again in each test
         super().startTest(test)
 
 suite = unittest.defaultTestLoader.discover('tests', top_level_dir='.')

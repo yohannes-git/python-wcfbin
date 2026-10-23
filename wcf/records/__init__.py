@@ -37,7 +37,8 @@ from wcf.records.base import *
 from wcf.records.text import *
 from wcf.records.attributes import *
 from wcf.records.elements import *
-from wcf.records.base import attribute_xml, qualified_name, start_tag
+from wcf.records.base import (_ARRAY, _COMMENT, _ELEMENT, _TEXT, attribute_xml,
+                              qualified_name, start_tag)
 from wcf.xmltext import comment, escape_text
 
 __all__ = (base.__all__ + text.__all__ + attributes.__all__ + elements.__all__ +
@@ -64,23 +65,6 @@ def _text_xml(record):
     return escape_text(str(record))
 
 
-_R_TEXT, _R_ELEMENT, _R_ARRAY, _R_OTHER = 1, 2, 3, 4
-_RENDER_KINDS = {}
-
-
-def _render_kind(cls):
-    if issubclass(cls, ArrayRecord):
-        kind = _R_ARRAY
-    elif issubclass(cls, Element):
-        kind = _R_ELEMENT
-    elif issubclass(cls, Text) and cls.standalone:
-        kind = _R_TEXT
-    else:
-        kind = _R_OTHER
-    _RENDER_KINDS[cls] = kind
-    return kind
-
-
 def render_xml(records):
     """Produce XML without introducing whitespace or altering text values.
 
@@ -89,15 +73,14 @@ def render_xml(records):
     """
     parts = []
     append = parts.append
-    kinds = _RENDER_KINDS
     stack = [(iter(records), None)]  # (siblings, end tag of their parent)
     while stack:
         siblings, end_tag = stack[-1]
         for r in siblings:
-            kind = kinds.get(r.__class__) or _render_kind(r.__class__)
-            if kind == _R_TEXT:
+            kind = r._kind
+            if kind is _TEXT and r.standalone:
                 append(_text_xml(r))
-            elif kind == _R_ELEMENT:
+            elif kind is _ELEMENT:
                 name = qualified_name(r)
                 if r.attributes:
                     append('<%s%s>' % (name, ''.join(map(attribute_xml, r.attributes))))
@@ -105,14 +88,14 @@ def render_xml(records):
                     append('<%s>' % name)
                 stack.append((iter(r.childs), '</%s>' % name))
                 break
-            elif kind == _R_ARRAY:
+            elif kind is _ARRAY:
                 tag = start_tag(r.element, r.attributes)
                 end = '</%s>' % qualified_name(r.element)
                 for value in r.data:
                     append(tag + _text_xml(value) + end)
-            elif isinstance(r, CommentRecord):
+            elif kind is _COMMENT:
                 append(comment(r.comment))
-            elif isinstance(r, Text):
+            elif kind is _TEXT:
                 raise WcfBinaryError('WCF EndListText without StartListText')
             else:
                 raise WcfBinaryError('Cannot render record %s as XML' % type(r).__name__)

@@ -130,7 +130,6 @@ class Record(object):
                 raise RuntimeError('MC-NBFX record type 0x%02X registered twice'
                                    % r.type)
             Record.records[r.type] = r
-        _KINDS.clear()
 
     def to_bytes(self):
         """
@@ -180,7 +179,7 @@ class Record(object):
         parents = []  # pairs of (container, open element)
         open_element = None
         read = fp.read
-        kinds = _KINDS
+        registry = Record.records
         charge = budget.charge
         if max_depth is None:
             max_depth = float('inf')
@@ -188,10 +187,20 @@ class Record(object):
             octet = read(1)
             if not octet:
                 break
-            kind = kinds.get(octet[0])
-            if kind is None:
-                kind = _record_kind(octet[0])
-            what, record_class = kind
+            record_class = registry.get(octet[0])
+            if record_class is not None:
+                what = record_class._kind
+                if what is _TEXT and not record_class.standalone:
+                    raise WcfBinaryError('EndListText without StartListText')
+            else:
+                # *TextWithEndElement: the type after that of its text record
+                record_class = registry.get(octet[0] - 1)
+                if (not octet[0] & 1 or record_class is None or
+                        record_class._kind is not _TEXT or
+                        not record_class.with_end_element):
+                    raise WcfBinaryError('Unknown or reserved WCF record 0x%02X'
+                                         % octet[0])
+                what = _TEXT_END
             obj = record_class.parse(fp)
             if what is _TEXT:
                 charge(1, obj.char_count())
@@ -225,46 +234,20 @@ class Record(object):
                 closed._wcf_closure = 'explicit'
                 open_element = parents[-1][1] if parents else None
             else:
-                _charge_record(obj)
-                records.append(obj)
+                if what is _COMMENT:
+                    charge(1, len(obj.comment))
+                records.append(obj)  # arrays are charged by their parse()
         if parents:
             raise WcfBinaryError('Unterminated element in WCF Binary XML')
         return root
 
 
-# record type -> (kind, class), computed on first use and reset by
-# Record.add_records(): one dict lookup per record instead of an
-# isinstance() cascade
-_KINDS = {}
-_TEXT, _TEXT_END, _ELEMENT, _ATTRIBUTE, _END, _OTHER = (
-    'text', 'text+end', 'element', 'attribute', 'end', 'other')
-
-
-def _record_kind(record_type):
-    record_class = Record.records.get(record_type)
-    if record_class is not None:
-        if issubclass(record_class, EndElementRecord):
-            kind = _END
-        elif issubclass(record_class, Element):
-            kind = _ELEMENT
-        elif issubclass(record_class, Attribute):
-            kind = _ATTRIBUTE
-        elif issubclass(record_class, Text):
-            if not record_class.standalone:
-                raise WcfBinaryError('EndListText without StartListText')
-            kind = _TEXT
-        else:
-            kind = _OTHER
-    else:
-        # *TextWithEndElement: the type after that of its text record
-        record_class = Record.records.get(record_type - 1)
-        if (not record_type & 1 or record_class is None or
-                not issubclass(record_class, Text) or
-                not record_class.with_end_element):
-            raise WcfBinaryError('Unknown or reserved WCF record 0x%02X' % record_type)
-        kind = _TEXT_END
-    _KINDS[record_type] = kind, record_class
-    return kind, record_class
+# the kinds of record (Record._kind): one class attribute read per record
+# instead of an isinstance() cascade, and no cache to keep in sync
+_OTHER, _TEXT, _TEXT_END, _ELEMENT, _ATTRIBUTE, _END, _COMMENT, _ARRAY = (
+    'other', 'text', 'text+end', 'element', 'attribute', 'end', 'comment',
+    'array')
+Record._kind = _OTHER
 
 
 class Element(Record):
@@ -274,6 +257,7 @@ class Element(Record):
     (*TextWithEndElement), kept when it is serialized again."""
     prefix = None
     _wcf_closure = None
+    _kind = _ELEMENT
 
     @property
     def qname(self):
@@ -298,6 +282,7 @@ class Attribute(Record):
     ``namespace``."""
     prefix = None
     is_xmlns = False
+    _kind = _ATTRIBUTE
 
     @property
     def qname(self):
@@ -316,6 +301,7 @@ class Text(Record):
     max_chars = None
     standalone = True
     with_end_element = True
+    _kind = _TEXT
 
     def char_count(self):
         """The number of characters represented, or an upper bound."""
@@ -326,6 +312,7 @@ class Text(Record):
 
 class EndElementRecord(Record):
     type = 0x01
+    _kind = _END
 
 
 def validate_xml_name(name, description='name'):
@@ -438,6 +425,7 @@ def letter_records(base, first_type, name_format, namespace):
 
 class CommentRecord(Record):
     type = 0x02
+    _kind = _COMMENT
 
     def __init__(self, comment):
         self.comment = comment
@@ -465,6 +453,7 @@ class ArrayRecord(Record):
     """MC-NBFX 2.3.3: an element (with its attributes) repeated for each
     value of a typed array."""
     type = 0x03
+    _kind = _ARRAY
 
     # the *TextWithEndElement record types an array can hold
     datatypes = frozenset((0xB5, 0x8B, 0x8D, 0x8F, 0x91, 0x93, 0x95, 0x97,
@@ -619,19 +608,6 @@ def _attribute_cost(record):
     if record.is_xmlns:
         return 1, len(record.prefix or '') + len(record.namespace)
     return 2, _name_chars(record) + record.value.char_count()
-
-
-def _charge_record(record):
-    """Charge a record read by Record.parse (array and list items are
-    charged by their own parse())."""
-    if isinstance(record, Text):
-        charge(1, record.char_count())
-    elif isinstance(record, Attribute):
-        charge(*_attribute_cost(record))
-    elif isinstance(record, CommentRecord):
-        charge(1, len(record.comment))
-    elif isinstance(record, Element):
-        charge(1, 2 * _name_chars(record))  # start and end tags
 
 
 Record.add_records((EndElementRecord, CommentRecord, ArrayRecord))
