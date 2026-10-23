@@ -83,6 +83,16 @@ class TextRepresentations(unittest.TestCase):
             Bytes32TextRecord(b'').to_bytes()
         self.assertEqual(b'\xa2\x01\x00\x00\x00a', Bytes32TextRecord(b'a').to_bytes())
 
+    def test_float_below_one_has_a_leading_zero(self):
+        # "a single zero "0" MUST precede the decimal point"
+        for value, text in ((0.5, '0.5'), (-0.25, '-0.25'), (0.1, '0.1'),
+                            (1e-7, '1E-7'), (100.0, '1E+2')):
+            with self.subTest(value=value):
+                self.assertEqual(text, str(DoubleTextRecord(value)))
+                self.assertEqual(text, str(FloatTextRecord(value)))
+        self.assertEqual('<a>0.5</a>', render_xml(decode(bytes.fromhex(
+            '40 01 61 92 00 00 00 00 00 00 E0 3F 01'))))
+
     def test_unicode_chars32_uses_int32(self):
         # MC-NBFX section 3 example; the .NET reader agrees (section
         # 2.2.3.29 says MultiByteInt31, which contradicts both)

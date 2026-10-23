@@ -70,13 +70,17 @@ def _shortest_ieee754_text(value, single_precision):
         raise ValueError('Cannot render MC-NBFX floating-point value')
 
     # Choose ordinary decimal only when the point falls within the range of
-    # significant digits. Outside that range MC-NBFX requires E[+-]exponent.
+    # significant digits, or just before it ("0.5": "except when a decimal
+    # point is the first character, in which case a single zero MUST
+    # precede the decimal point"). Outside that range MC-NBFX requires
+    # E[+-]exponent: 100 is "1E+2" (.NET would write "100", the text of
+    # 2.2.3.9/2.2.3.10 is followed, no example covers this case).
     as_decimal = decimal.Decimal(candidate)
     negative = as_decimal.is_signed()
     sign, digit_tuple, exponent = as_decimal.as_tuple()
     figures = ''.join(map(str, digit_tuple))
     decimal_position = len(figures) + exponent
-    if 1 <= decimal_position <= len(figures):
+    if 0 <= decimal_position <= len(figures):
         return format(as_decimal, 'f')
 
     mantissa = figures[:1]
