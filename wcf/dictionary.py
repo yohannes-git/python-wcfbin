@@ -522,6 +522,7 @@ inverted_dict = {v: k for k, v in dictionary.items()}
 # for a dictionary negotiated incrementally across a session.  Keep the
 # immutable static entries separate from session data.  A scoped mapping
 # avoids leaking strings between connections/threads/coroutines.
+from collections import ChainMap
 from collections.abc import Mapping
 
 from wcf.errors import WcfBinaryError
@@ -549,11 +550,13 @@ class _SessionMaps(object):
     """The active session dictionary, both ways. The string to id map is
     built on first use only, once per context, and not on every lookup."""
 
-    __slots__ = ('forward', '_reverse')
+    __slots__ = ('forward', '_reverse', 'forward_layers', 'reverse_layers')
 
     def __init__(self, forward, reverse=None):
         self.forward = forward
         self._reverse = reverse
+        self.forward_layers = _layers(forward)
+        self.reverse_layers = None if reverse is None else _layers(reverse)
 
     @property
     def reverse(self):
@@ -561,8 +564,22 @@ class _SessionMaps(object):
             self._reverse = {value: index for index, value in self.forward.items()}
         return self._reverse
 
+    def build_reverse_layers(self):
+        self.reverse_layers = _layers(self.reverse)
+        return self.reverse_layers
+
+
+def _layers(mapping):
+    """The mappings to look a key up in, in order: a ChainMap is
+    flattened so that a lookup never goes through ChainMap's Python
+    __getitem__/__missing__ (and their KeyError) but through dict.get."""
+    if isinstance(mapping, ChainMap):
+        return tuple(layer for m in mapping.maps for layer in _layers(m))
+    return (mapping,)
+
 
 _NO_SESSION = _SessionMaps({}, {})
+_MISSING = object()
 
 
 class _SessionDictionaryView(Mapping):
@@ -574,14 +591,47 @@ class _SessionDictionaryView(Mapping):
         maps = _session_dictionary.get() or _NO_SESSION
         return maps.reverse if self._reverse else maps.forward
 
+    # Static IDs take precedence where a string exists in both tables.
+    # The lookup is written out in each method: it is the hottest code
+    # of the codec, and a helper call would double its cost.
     def __getitem__(self, key):
-        # Static IDs take precedence where a string exists in both tables.
-        if key in self._static:
-            return self._static[key]
-        try:
-            return self._dynamic()[key]
-        except KeyError:
-            raise UnknownDictionaryId(key) from None
+        value = self._static.get(key, _MISSING)
+        if value is _MISSING:
+            maps = _session_dictionary.get() or _NO_SESSION
+            for layer in (maps.reverse_layers or maps.build_reverse_layers()
+                          if self._reverse else maps.forward_layers):
+                value = layer.get(key, _MISSING)
+                if value is not _MISSING:
+                    break
+            else:
+                raise UnknownDictionaryId(key)
+        return value
+
+    def get(self, key, default=None):
+        value = self._static.get(key, _MISSING)
+        if value is _MISSING:
+            maps = _session_dictionary.get() or _NO_SESSION
+            for layer in (maps.reverse_layers or maps.build_reverse_layers()
+                          if self._reverse else maps.forward_layers):
+                value = layer.get(key, _MISSING)
+                if value is not _MISSING:
+                    break
+            else:
+                return default
+        return value
+
+    def __contains__(self, key):
+        value = self._static.get(key, _MISSING)
+        if value is _MISSING:
+            maps = _session_dictionary.get() or _NO_SESSION
+            for layer in (maps.reverse_layers or maps.build_reverse_layers()
+                          if self._reverse else maps.forward_layers):
+                value = layer.get(key, _MISSING)
+                if value is not _MISSING:
+                    break
+            else:
+                return False
+        return True
 
     def __iter__(self):
         yield from self._static

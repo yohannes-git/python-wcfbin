@@ -89,6 +89,9 @@ class _StrN(dict):
     def __getitem__(self, key):
         return 'str%d' % key
 
+    def get(self, key, default=None):
+        return self[key] if key in self else default
+
 
 @contextlib.contextmanager
 def strn_dictionary():

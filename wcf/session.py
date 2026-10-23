@@ -197,8 +197,12 @@ class BinaryXmlSession:
         entries, reverse = self._new_entries(new_strings, len(table))
         # serializing resolves every dictionary reference: an ID unknown
         # to the peer cannot be written
-        with dictionary_context(ChainMap(entries, self._entries),
-                                ChainMap(reverse, self._value_to_id)):
+        if entries:
+            scope = dictionary_context(ChainMap(entries, self._entries),
+                                       ChainMap(reverse, self._value_to_id))
+        else:  # no ChainMap (Python lookups) without new strings
+            scope = dictionary_context(self._entries, self._value_to_id)
+        with scope:
             data = (MultiByteInt31(len(table)).to_bytes() + table +
                     dump_records(make_records()))
         if len(data) > self._max_document_bytes:
