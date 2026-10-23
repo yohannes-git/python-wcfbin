@@ -98,8 +98,8 @@ def render_xml(records):
 def print_records(records, skip=0, fp=None, first_call=True):
     """Print the character-equivalent XML, without pretty-print whitespace.
 
-    ``skip`` and ``first_call`` remain accepted for source compatibility
-    (WcfPlugin.py); use render_xml().
+    ``skip`` and ``first_call`` remain accepted for source compatibility;
+    use render_xml().
     """
     if fp is None:
         fp = sys.stdout

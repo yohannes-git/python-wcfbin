@@ -1,6 +1,12 @@
 Python Library for de- and encoding of WCF-Binary streams
 ---------------------------------------------------------
 
+.. note::
+
+   The original announcement of the library, kept for its history. The
+   Burp plugin (WcfPlugin.py) and the HTTP proxy (proxy.py) it describes
+   were Python 2 tools; they were removed in version 0.6.0.
+
 Inside of a .Net environment WCF services uses the proprietary WCF-Binary-XML
 protocol as described `here <https://blogs.msdn.com/b/drnick/archive/2009/09/11/binary-encoding-part-4.aspx>`_.
 

@@ -26,6 +26,9 @@ Behaviour changes:
 * `Record.parse()` applies decoding quotas (`Quotas`, `DEFAULT_QUOTAS`).
 * Python 3.8 or later; the `future` dependency and the Python 2 code are
   gone; the library no longer configures logging when imported.
+* `proxy.py` and `WcfPlugin.py` are removed: Python 2 tools (an HTTP
+  proxy and a Jython plugin for Burp) that the Python 3 library cannot
+  serve; `wcf2xml.py` and `xml2wcf.py` remain.
 
 New:
 
