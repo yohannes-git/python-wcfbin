@@ -559,10 +559,15 @@ class DatetimeTextRecord(Text):
         if self.tz == 1:
             text += 'Z'
         elif self.tz == 2:
-            # MC-NBFX explicitly requires the offset of the decoding host.
-            offset = dt.astimezone().utcoffset()
-            if offset is None:
-                raise ValueError('Local UTC offset could not be determined')
+            # MC-NBFX explicitly requires the offset of the decoding host:
+            # the one in effect at that date when the host can compute it
+            # (as .NET's TimeZoneInfo.Local.GetUtcOffset), the current one
+            # near the ends of the range (e.g. DateTime.MaxValue), where
+            # converting to local time leaves years 1-9999.
+            try:
+                offset = dt.astimezone().utcoffset()
+            except (OverflowError, OSError, ValueError):
+                offset = datetime.datetime.now().astimezone().utcoffset()
             offset_minutes = int(offset.total_seconds() / 60)
             absolute = abs(offset_minutes)
             text += '%s%02d:%02d' % ('+' if offset_minutes >= 0 else '-',

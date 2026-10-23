@@ -93,6 +93,7 @@ class QuotaTests(unittest.TestCase):
             DecimalTextRecord(Decimal(True, 2 ** 32 - 1, 2 ** 64 - 1, 28)),
             DecimalTextRecord(Decimal(True, 0, 1, 28)),
             DatetimeTextRecord(3155378975999999999, 1),
+            DatetimeTextRecord(3155378975999999999, 2),
             UniqueIdTextRecord('urn:uuid:33221100-5544-7766-8899-aabbccddeeff'),
             UuidTextRecord('33221100-5544-7766-8899-aabbccddeeff'),
             TimeSpanTextRecord(-2 ** 63), TimeSpanTextRecord(2 ** 63 - 1)]

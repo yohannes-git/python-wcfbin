@@ -5,6 +5,7 @@ complete WCF/.NET interoperability or MC-NBFSE certification suite.
 """
 
 import io
+import re
 import unittest
 from xml.etree import ElementTree as ET
 
@@ -254,6 +255,14 @@ class BinaryFidelity(unittest.TestCase):
         self.assertEqual('PT0.0000001S', str(TimeSpanTextRecord(1)))
         self.assertEqual('-P10675199DT2H48M5.4775808S',
                          str(TimeSpanTextRecord(-(1 << 63))))
+
+    def test_datetime_local_at_the_ends_of_the_range(self):
+        # DateTime.MinValue and MaxValue with Kind=Local
+        for ticks, date in ((0, '0001-01-01'), (3155378975999999999,
+                                                '9999-12-31T23:59:59.9999999')):
+            with self.subTest(ticks=ticks):
+                self.assertRegex(str(DatetimeTextRecord(ticks, 2)),
+                                 '^' + re.escape(date) + r'[+-]\d\d:\d\d$')
 
     def test_datetime_preserves_100_ns_and_utc(self):
         self.assertEqual('0001-01-01T00:00:00.0000001',
