@@ -37,13 +37,48 @@ from wcf.records.base import *
 from wcf.records.text import *
 from wcf.records.attributes import *
 from wcf.records.elements import *
-from wcf.records.base import qualified_name, start_tag
+from wcf.records.base import attribute_xml, qualified_name, start_tag
 from wcf.xmltext import comment, escape_text
 
 __all__ = (base.__all__ + text.__all__ + attributes.__all__ + elements.__all__ +
            ['render_xml', 'print_records', 'repr_records', 'dump_records'])
 
 _END = object()
+
+
+# text records whose str() never needs escaping (base64, floats, dates):
+# exact classes, a subclass may render differently, and only those whose
+# str() is made by this code whatever their value (a hand-made
+# Int32TextRecord('<x/>') or DecimalTextRecord('<x/>') is escaped: they
+# write str(value), and integers are short to scan anyway)
+_SAFE_TEXT = frozenset((
+    ZeroTextRecord, OneTextRecord, FalseTextRecord, TrueTextRecord,
+    BoolTextRecord, FloatTextRecord, DoubleTextRecord, DatetimeTextRecord,
+    UniqueIdTextRecord, UuidTextRecord, Bytes8TextRecord, Bytes16TextRecord,
+    Bytes32TextRecord, EmptyTextRecord, TimeSpanTextRecord))
+
+
+def _text_xml(record):
+    if record.__class__ in _SAFE_TEXT:
+        return str(record)
+    return escape_text(str(record))
+
+
+_R_TEXT, _R_ELEMENT, _R_ARRAY, _R_OTHER = 1, 2, 3, 4
+_RENDER_KINDS = {}
+
+
+def _render_kind(cls):
+    if issubclass(cls, ArrayRecord):
+        kind = _R_ARRAY
+    elif issubclass(cls, Element):
+        kind = _R_ELEMENT
+    elif issubclass(cls, Text) and cls.standalone:
+        kind = _R_TEXT
+    else:
+        kind = _R_OTHER
+    _RENDER_KINDS[cls] = kind
+    return kind
 
 
 def render_xml(records):
@@ -53,30 +88,38 @@ def render_xml(records):
     interpreter recursion limit.
     """
     parts = []
+    append = parts.append
+    kinds = _RENDER_KINDS
     stack = [(iter(records), None)]  # (siblings, end tag of their parent)
     while stack:
         siblings, end_tag = stack[-1]
-        r = next(siblings, _END)
-        if r is _END:
+        for r in siblings:
+            kind = kinds.get(r.__class__) or _render_kind(r.__class__)
+            if kind == _R_TEXT:
+                append(_text_xml(r))
+            elif kind == _R_ELEMENT:
+                name = qualified_name(r)
+                if r.attributes:
+                    append('<%s%s>' % (name, ''.join(map(attribute_xml, r.attributes))))
+                else:
+                    append('<%s>' % name)
+                stack.append((iter(r.childs), '</%s>' % name))
+                break
+            elif kind == _R_ARRAY:
+                tag = start_tag(r.element, r.attributes)
+                end = '</%s>' % qualified_name(r.element)
+                for value in r.data:
+                    append(tag + _text_xml(value) + end)
+            elif isinstance(r, CommentRecord):
+                append(comment(r.comment))
+            elif isinstance(r, Text):
+                raise WcfBinaryError('WCF EndListText without StartListText')
+            else:
+                raise WcfBinaryError('Cannot render record %s as XML' % type(r).__name__)
+        else:
             stack.pop()
             if end_tag is not None:
-                parts.append(end_tag)
-        elif isinstance(r, ArrayRecord):
-            tag = start_tag(r.element, r.attributes)
-            end = '</%s>' % qualified_name(r.element)
-            for value in r.data:
-                parts.append(tag + escape_text(str(value)) + end)
-        elif isinstance(r, Element):
-            parts.append(start_tag(r))
-            stack.append((iter(r.childs), '</%s>' % qualified_name(r)))
-        elif isinstance(r, CommentRecord):
-            parts.append(comment(r.comment))
-        elif isinstance(r, Text) and r.standalone:
-            parts.append(escape_text(str(r)))
-        elif isinstance(r, Text):
-            raise WcfBinaryError('WCF EndListText without StartListText')
-        else:
-            raise WcfBinaryError('Cannot render record %s as XML' % type(r).__name__)
+                append(end_tag)
     return ''.join(parts)
 
 

@@ -1,6 +1,7 @@
 """render_xml(): the XML text must have the structure of the records."""
 
 import io
+import struct
 import unittest
 from xml.etree import ElementTree as ET
 
@@ -62,6 +63,26 @@ class RenderInjectionTests(unittest.TestCase):
 
 
 class RenderEscapingTests(unittest.TestCase):
+
+    def test_hand_made_records_are_escaped_or_refused(self):
+        # records built by a program, with values of an unexpected type:
+        # never written as markup
+        from wcf.records import (Int32TextRecord, UInt64TextRecord,
+                                 DecimalTextRecord, DoubleTextRecord,
+                                 DatetimeTextRecord, TimeSpanTextRecord)
+        for record in (Int32TextRecord('<x/>'), UInt64TextRecord('<x/>'),
+                       DecimalTextRecord('<x/>')):
+            element = ShortElementRecord('a')
+            element.childs.append(record)
+            self.assertEqual('<a>&lt;x/&gt;</a>', render_xml([element]))
+        for record in (DoubleTextRecord('<x/>'), DatetimeTextRecord('<x/>', 0),
+                       TimeSpanTextRecord('<x/>')):
+            element = ShortElementRecord('a')
+            element.childs.append(record)
+            with self.subTest(record=type(record).__name__):
+                with self.assertRaises((ValueError, TypeError, struct.error)):
+                    render_xml([element])
+
 
     def test_microsoft_character_escaping_example(self):
         # MC-NBFX 2.2.3.13.1: { 0x22, 0x26, 0x3C, 0x3E, 0x27, 0x00 }
