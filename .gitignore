@@ -10,7 +10,7 @@ __pycache__
 *.BASE*
 *.LOCAL*
 *.REMOTE*
-data
+/data
 *.egg-info
 build
 dist
