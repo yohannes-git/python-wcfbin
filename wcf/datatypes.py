@@ -40,6 +40,11 @@ __all__ = ['MultiByteInt31', 'Utf8String', 'Decimal', 'read_exact',
            'read_struct']
 
 
+# above this length, read in chunks of it: MC-NBFX 4, "avoid allocating
+# memory based solely on the length"
+_READ_CHUNK = 1 << 16
+
+
 def read_exact(fp, length):
     """Read exactly ``length`` bytes, WcfBinaryError on truncated input.
 
@@ -51,7 +56,18 @@ def read_exact(fp, length):
     ...
     wcf.errors.WcfBinaryError: Truncated WCF binary data (expected 2 bytes, got 1)
     """
-    data = fp.read(length)
+    if length <= _READ_CHUNK:
+        data = fp.read(length)
+    else:
+        # the read(n) of a file object allocates n bytes before reading
+        parts, remaining = [], length
+        while remaining:
+            part = fp.read(min(remaining, _READ_CHUNK))
+            if not part:
+                break
+            parts.append(part)
+            remaining -= len(part)
+        data = b''.join(parts)
     if len(data) != length:
         raise WcfBinaryError('Truncated WCF binary data (expected %d bytes, got %d)'
                          % (length, len(data)))

@@ -93,6 +93,26 @@ class QuotaTests(unittest.TestCase):
             parse(wire, Quotas(max_records=500))
         self.assertEqual(1999, len(render_xml(parse(wire))) - len('<a></a>'))
 
+    def test_announced_lengths_are_not_allocated(self):
+        # MC-NBFX 4: an 8-byte document announcing 2 GiB must not make a
+        # file object allocate them
+        class Spy(io.BytesIO):
+            largest = 0
+
+            def read(self, size=-1):
+                Spy.largest = max(Spy.largest, size)
+                return super().read(size)
+        for wire in (b'\x40\x01a\x9c\xff\xff\xff\x7f',   # Chars32Text
+                     b'\x40\x01a\xa2\xff\xff\xff\x7f',   # Bytes32Text
+                     b'\x40\x01a\xba\xff\xff\xff\x7f',   # UnicodeChars32Text
+                     b'\x40\xff\xff\xff\xff\x07',        # String
+                     b'\x02\xff\xff\xff\xff\x07'):       # Comment
+            with self.subTest(wire=wire), self.assertRaises(ValueError):
+                Record.parse(Spy(wire))
+        self.assertLessEqual(Spy.largest, 1 << 16)
+        big = b'\x40\x01a\x9d' + struct.pack('<i', 300000) + b'x' * 300000
+        self.assertEqual(300000, len(parse(big)[0].childs[0].value))
+
     def test_quotas_are_immutable(self):
         import dataclasses
         from wcf.records import DEFAULT_QUOTAS
