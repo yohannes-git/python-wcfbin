@@ -240,10 +240,20 @@ class BinaryFidelity(unittest.TestCase):
             BoolTextRecord.parse(io.BytesIO(b'\x02'))
 
     def test_time_span_ticks_from_microsoft_spec(self):
-        self.assertEqual('00:00:01', str(TimeSpanTextRecord(10000000)))
-        self.assertEqual('-00:00:01.0000001', str(TimeSpanTextRecord(-10000001)))
-        self.assertEqual('1.02:03:04.5', str(TimeSpanTextRecord(
+        # MC-NBFX section 3 examples
+        self.assertEqual('<doc>-PT5M44S</doc>', render_xml(Record.parse(io.BytesIO(
+            bytes.fromhex('40 03 64 6F 63 AE 00 C4 F5 32 FF FF FF FF 01')))))
+        self.assertEqual('<a>PT3H20M</a>', render_xml(Record.parse(io.BytesIO(
+            bytes.fromhex('40 01 61 AF 00 B0 8E F0 1B 00 00 00')))))
+        # XmlConvert.ToString(TimeSpan)
+        self.assertEqual('PT1S', str(TimeSpanTextRecord(10000000)))
+        self.assertEqual('-PT1.0000001S', str(TimeSpanTextRecord(-10000001)))
+        self.assertEqual('P1DT2H3M4.5S', str(TimeSpanTextRecord(
             ((86400 + 2 * 3600 + 3 * 60 + 4) * 10000000) + 5000000)))
+        self.assertEqual('P2D', str(TimeSpanTextRecord(2 * 864000000000)))
+        self.assertEqual('PT0.0000001S', str(TimeSpanTextRecord(1)))
+        self.assertEqual('-P10675199DT2H48M5.4775808S',
+                         str(TimeSpanTextRecord(-(1 << 63))))
 
     def test_datetime_preserves_100_ns_and_utc(self):
         self.assertEqual('0001-01-01T00:00:00.0000001',

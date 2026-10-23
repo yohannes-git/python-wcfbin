@@ -898,17 +898,43 @@ class TimeSpanTextRecord(Text):
                      struct.pack(b'<q', self.value))
 
     def __str__(self):
-        """Format signed ticks as the WCF MC-NBFX TimeSpanText lexical form."""
-        value = abs(self.value)
-        total_seconds, fractional = divmod(value, 10000000)
-        days, rem = divmod(total_seconds, 86400)
-        hours, rem = divmod(rem, 3600)
-        minutes, seconds = divmod(rem, 60)
-        text = ('%d.' % days if days else '') + '%02d:%02d:%02d' % (
-            hours, minutes, seconds)
-        if fractional:
-            text += '.' + ('%07d' % fractional).rstrip('0')
-        return ('-' if self.value < 0 else '') + text
+        """The xsd:duration form, as .NET XmlConvert.ToString(TimeSpan).
+
+        MC-NBFX 2.2.3.23 describes a "[DDDDDDDD.]HH:mm:ss[.fffffff]"
+        form, but the examples of MC-NBFX section 3 ("-PT5M44S",
+        "PT3H20M") and .NET, whose reader returns
+        XmlConvert.ToString(TimeSpan), use xsd:duration, which is also
+        what DataContract deserializes a TimeSpan from.
+
+        >>> str(TimeSpanTextRecord(-3440000000))
+        '-PT5M44S'
+        >>> str(TimeSpanTextRecord(120000000000))
+        'PT3H20M'
+        >>> str(TimeSpanTextRecord(0))
+        'PT0S'
+        """
+        ticks = abs(self.value)
+        seconds, fraction = divmod(ticks, 10000000)
+        days, seconds = divmod(seconds, 86400)
+        hours, seconds = divmod(seconds, 3600)
+        minutes, seconds = divmod(seconds, 60)
+        text = '-P' if self.value < 0 else 'P'
+        if days:
+            text += '%dD' % days
+        if hours or minutes or seconds or fraction:
+            text += 'T'
+            if hours:
+                text += '%dH' % hours
+            if minutes:
+                text += '%dM' % minutes
+            if seconds or fraction:
+                text += '%d' % seconds
+                if fraction:
+                    text += '.' + ('%07d' % fraction).rstrip('0')
+                text += 'S'
+        if text.endswith('P'):
+            text += 'T0S'
+        return text
 
     @classmethod
     def parse(cls, fp):
@@ -916,7 +942,7 @@ class TimeSpanTextRecord(Text):
         >>> from io import BytesIO
         >>> fp = BytesIO(b'\x00Q%\x02\x00\x00\x00\x00')
         >>> str(TimeSpanTextRecord.parse(fp))
-        '00:00:03.6'
+        'PT3.6S'
         """
         value = read_struct(fp, '<q')
         return cls(value)

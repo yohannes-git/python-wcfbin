@@ -38,8 +38,9 @@ class IndependentMicrosoftNbfxTests(unittest.TestCase):
     def test_datetime_midnight_as_in_normative_section_22312(self):
         self.assertEqual('2006-05-17', str(DatetimeTextRecord(632834208000000000, 0)))
 
-    def test_timespan_no_days_as_in_normative_section_22323(self):
-        self.assertEqual('00:05:44', str(TimeSpanTextRecord(3440000000)))
+    def test_timespan_as_in_section_3_examples_and_dotnet(self):
+        # not the "HH:mm:ss" of 2.2.3.23: see TimeSpanTextRecord.__str__
+        self.assertEqual('PT5M44S', str(TimeSpanTextRecord(3440000000)))
 
     def test_float_text_is_shortest_32bit_decimal_microsoft_example_1(self):
         self.assertEqual('<doc a="1.1"></doc>', render_xml(parse_wire(
