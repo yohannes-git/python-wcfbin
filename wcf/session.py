@@ -108,6 +108,7 @@ class BinaryXmlSession:
         self._entries = {}
         self._value_to_id = {}
         self._session_bytes = 0
+        self._out_of_step = False
 
     @contextmanager
     def context(self):
@@ -146,12 +147,30 @@ class BinaryXmlSession:
         The strings of a valid StringTable join the session dictionary even
         if the document that follows is refused: the producer numbered
         them, and the IDs of the following documents count them (MC-NBFSE
-        2.1, "A consumer of this format MUST maintain this mapping").
+        2.1, "A consumer of this format MUST maintain this mapping"). When
+        the StringTable itself is refused, the number of strings the
+        producer added is unknown: the session is out of step and refuses
+        every document until reset().
         """
+        if self._out_of_step:
+            raise WcfBinaryError('MC-NBFSE session out of step since a refused '
+                                 'StringTable: reset() it')
         with binary_errors():
-            return self._parse_document(data, quotas)
+            committed = False
+            try:
+                fp = self._read_string_table(data)
+                committed = True
+            finally:
+                self._out_of_step = not committed
+            # Record.parse() resolves every dictionary reference
+            with self.context():
+                records = Record.parse(fp, self.quotas if quotas is None else quotas)
+        return SessionDocument(records, self._last_strings, self._entries,
+                               self._value_to_id)
 
-    def _parse_document(self, data, quotas):
+    def _read_string_table(self, data):
+        """Read the StringTable of a document into the session; returns the
+        document positioned after it."""
         if len(data) > self._max_document_bytes:
             raise WcfBinaryError('MC-NBFSE document size limit exceeded')
         fp = BytesIO(data)
@@ -165,11 +184,8 @@ class BinaryXmlSession:
             if len(self._entries) + len(new_strings) > self._max_strings:
                 raise WcfBinaryError('MC-NBFSE session dictionary limit exceeded')
         self._commit(*self._new_entries(new_strings, size), size)
-        # Record.parse() resolves every dictionary reference
-        with self.context():
-            records = Record.parse(fp, self.quotas if quotas is None else quotas)
-        return SessionDocument(records, new_strings, self._entries,
-                               self._value_to_id)
+        self._last_strings = new_strings
+        return fp
 
     def encode_records(self, records, new_strings=()):
         """Encode typed records, preserving their NBFX record types."""

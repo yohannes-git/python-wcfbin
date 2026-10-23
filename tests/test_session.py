@@ -102,6 +102,7 @@ class NbfseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Duplicate'):
             sess.parse_document(bad_table)
         self.assertEqual({}, sess.dictionary)
+        sess.reset()  # out of step after a refused StringTable
         sess.parse_document(encode_string_table(['a']) + b'\x40\x01a\x01')
         with self.assertRaisesRegex(ValueError, 'Duplicate'):
             sess.parse_document(encode_string_table(['a']) + b'\x40\x01b\x01')
@@ -127,6 +128,25 @@ class NbfseTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             s.encode_xml('<unclosed>', new_strings=['good'])
         self.assertEqual({}, s.dictionary)
+
+    def test_refused_table_puts_the_session_out_of_step(self):
+        # how many strings the producer numbered is unknown: every
+        # following document is refused until reset()
+        for refused in (encode_string_table(['x', 'x']) + b'\x42\x01\x01',  # duplicate
+                        b'\x05\x05goods'):                                 # truncated
+            s = BinaryXmlSession()
+            with self.subTest(refused=refused):
+                with self.assertRaises(ValueError):
+                    s.parse_document(refused)
+                with self.assertRaisesRegex(ValueError, 'out of step'):
+                    s.parse_document(b'\x00\x40\x01a\x01')
+                s.reset()
+                self.assertEqual('<a></a>', s.parse_document(b'\x00\x40\x01a\x01').render_xml())
+        s = BinaryXmlSession(max_document_bytes=10)
+        with self.assertRaises(ValueError):
+            s.parse_document(b'\x00' + b'\x40\x01a\x01' * 5)
+        with self.assertRaisesRegex(ValueError, 'out of step'):
+            s.parse_document(b'\x00\x40\x01a\x01')
 
     def test_table_of_a_refused_document_is_kept(self):
         # the producer numbered "x" 1 and "y" 3 even if the document that

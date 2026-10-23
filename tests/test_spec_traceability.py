@@ -2430,6 +2430,7 @@ class NBFSE_4_SecurityConsiderations(unittest.TestCase):
                      encode_string_table(['a', 'b', 'c']) + b'\x40\x01a\x01'):
             with self.subTest(wire=wire[:4]), self.assertRaises(WcfBinaryError):
                 session.parse_document(wire)
+            session.reset()  # out of step after a refused StringTable
         session.parse_document(encode_string_table(['x' * 8]) + b'\x40\x01a\x01')
         with self.assertRaises(WcfBinaryError):
             session.parse_document(encode_string_table(['y' * 8]) + b'\x40\x01a\x01')
