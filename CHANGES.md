@@ -1,0 +1,39 @@
+Changes
+=======
+
+0.6.0
+-----
+
+Conformity work (MC-NBFX, MC-NBFS, MC-NBFSE), then a review for
+conformity, security, code quality and performance.
+
+Behaviour changes:
+
+* XML to binary writes values as text (`Chars*Text`, or `DictionaryText`
+  for a string of the active dictionaries); typed records only through an
+  explicit type map (`8.0` is no longer re-typed as a double).
+* `str()` of the text records is the characters they represent, unescaped;
+  `render_xml()` escapes (MC-NBFX 2.2.3.13.1) and refuses names and comments
+  that XML cannot carry.
+* TimeSpanText is rendered as an xsd:duration, DateTimeText always with its
+  time, FloatText/DoubleText with the shortest round-trip digits and `0.5`
+  rather than `5E-1`, DecimalText `-0` as `0`.
+* UnicodeChars32Text has a 4-byte INT32 length.
+* Every data error raises `wcf.errors.WcfBinaryError` (a `ValueError`);
+  constructors refuse extra arguments and values of the wrong type
+  (`TypeError`).
+* `Record.parse()` applies decoding quotas (`Quotas`, `DEFAULT_QUOTAS`).
+* Python 3.8 or later; the `future` dependency and the Python 2 code are
+  gone; the library no longer configures logging when imported.
+
+New:
+
+* `wcf.session.BinaryXmlSession`: MC-NBFSE StringTables (session
+  dictionary with odd ids), bounded, kept for the following documents.
+* `wcf.records.Quotas`, `DEFAULT_QUOTAS`, `NO_QUOTAS`.
+* `wcf.errors.WcfBinaryError`, `wcf.dictionary.UnknownDictionaryId`.
+* `wcf.xmltext`: XML names, escaping and comments.
+* `wcf.datatypes.Decimal.from_string()`.
+* `wcf2xml.py --no-quotas`; `--nbfse` for both scripts.
+
+See README.md for the deviations from the text of the specification.
