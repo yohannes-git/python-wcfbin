@@ -34,6 +34,19 @@ class CliTests(unittest.TestCase):
                 self.assertIn(b'error:', result.stderr)
                 self.assertNotIn(b'Traceback', result.stderr)
 
+    def test_invalid_options_are_error_messages(self):
+        import tempfile
+        with tempfile.NamedTemporaryFile('w', suffix='.json') as fp:
+            for content in ('{not json', '{"/a": 5}'):
+                fp.seek(0)
+                fp.truncate()
+                fp.write(content)
+                fp.flush()
+                with self.subTest(content=content):
+                    result = run('xml2wcf.py', b'<a/>', '--types', fp.name)
+                    self.assertEqual(2, result.returncode)
+                    self.assertNotIn(b'Traceback', result.stderr)
+
     def test_no_quotas(self):
         deep = b'\x40\x01a' * 100 + b'\x01' * 100
         self.assertEqual(1, run('wcf2xml.py', deep).returncode)

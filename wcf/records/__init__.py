@@ -31,7 +31,7 @@
 import itertools
 import sys
 
-from wcf.errors import WcfBinaryError
+from wcf.errors import WcfBinaryError, binary_errors
 from wcf.records import attributes, base, elements, text
 from wcf.records.base import *
 from wcf.records.text import *
@@ -139,8 +139,14 @@ def dump_records(records):
     Closure style decoded from wire is retained: explicit EndElement (0x01)
     remains explicit, and TextWithEndElement remains implicit. Newly created
     trees use TextWithEndElement for their final text child by default.
-    Iterative, like render_xml().
+    Iterative, like render_xml(). Data that cannot be written (e.g. an
+    unpaired surrogate) raises WcfBinaryError.
     """
+    with binary_errors():
+        return _dump_records(records)
+
+
+def _dump_records(records):
     out = bytearray()
     stack = [(iter(records), None)]  # (siblings, closing record of their parent)
     while stack:

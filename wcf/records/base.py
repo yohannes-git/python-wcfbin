@@ -164,11 +164,11 @@ class Record(object):
         if cls is not Record:
             return cls()
 
-        budget = _Budget(quotas)
+        budget = _Budget(DEFAULT_QUOTAS if quotas is None else quotas)
         token = _budget.set(budget)
         try:
             with binary_errors():
-                return cls._parse_document(fp, quotas.max_depth, budget)
+                return cls._parse_document(fp, budget.quotas.max_depth, budget)
         finally:
             _budget.reset(token)
 
@@ -447,6 +447,9 @@ class CommentRecord(Record):
     _kind = _COMMENT
 
     def __init__(self, comment):
+        if not isinstance(comment, str):
+            raise TypeError('CommentRecord comment must be str, not %s'
+                            % type(comment).__name__)
         self.comment = comment
 
     def to_bytes(self):

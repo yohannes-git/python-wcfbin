@@ -23,16 +23,23 @@ def main(argv=None):
     args = parser.parse_args(argv)
     type_overrides = {}
     if args.types:
-        with open(args.types, 'r', encoding='utf-8') as fp:
-            type_overrides = json.load(fp)
-        if not isinstance(type_overrides, dict):
-            parser.error('--types must contain a JSON object')
+        try:
+            with open(args.types, 'r', encoding='utf-8') as fp:
+                type_overrides = json.load(fp)
+        except (OSError, ValueError) as error:
+            parser.error('--types: %s' % error)
+        if not isinstance(type_overrides, dict) or not all(
+                isinstance(value, str) for value in type_overrides.values()):
+            parser.error('--types must contain a JSON object of type names')
     new_strings = []
     if args.new_strings:
         if not args.nbfse:
             parser.error('--new-strings requires --nbfse')
-        with open(args.new_strings, 'r', encoding='utf-8') as fp:
-            new_strings = json.load(fp)
+        try:
+            with open(args.new_strings, 'r', encoding='utf-8') as fp:
+                new_strings = json.load(fp)
+        except (OSError, ValueError) as error:
+            parser.error('--new-strings: %s' % error)
         if not isinstance(new_strings, list) or not all(
                 isinstance(item, str) for item in new_strings):
             parser.error('--new-strings must contain a JSON list of strings')

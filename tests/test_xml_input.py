@@ -35,6 +35,22 @@ class XmlInputTests(unittest.TestCase):
         with self.assertRaisesRegex(UnknownDictionaryId, 'dictionary id 1'):
             Record.parse(io.BytesIO(b'\x42\x01\x01'))
 
+    def test_encoding_errors(self):
+        from wcf.errors import WcfBinaryError
+        from wcf.records import (ShortElementRecord, Chars8TextRecord,
+                                 CommentRecord)
+        for element in (ShortElementRecord('a\udc00'), ShortElementRecord('a')):
+            if element.name == 'a':
+                element.childs.append(Chars8TextRecord('\ud800'))
+            with self.assertRaises(WcfBinaryError):
+                dump_records([element])
+        with self.assertRaises(WcfBinaryError):
+            BinaryXmlSession().encode_records([ShortElementRecord('a\udc00')])
+        with self.assertRaises(TypeError):
+            CommentRecord(b'x')
+        # None means the default quotas, as for BinaryXmlSession
+        self.assertEqual(1, len(Record.parse(io.BytesIO(b'\x40\x01a\x01'), None)))
+
     def test_names_must_be_ncnames(self):
         # a non namespace-aware parser takes "b:c" as the local name
         for xml in ('<a:b:c xmlns:a="urn:a"/>',

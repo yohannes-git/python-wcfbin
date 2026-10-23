@@ -191,6 +191,10 @@ class BinaryXmlSession:
         new_strings = tuple(new_strings)
         if not all(isinstance(string, str) for string in new_strings):
             raise TypeError('MC-NBFSE strings must be Unicode')
+        with binary_errors():  # e.g. an unpaired surrogate
+            return self._encode_document(new_strings, make_records)
+
+    def _encode_document(self, new_strings, make_records):
         table = b''.join(utf8_bytes(string) for string in new_strings)
         if len(table) > self._max_table_bytes:
             raise WcfBinaryError('MC-NBFSE StringTable size limit exceeded')
