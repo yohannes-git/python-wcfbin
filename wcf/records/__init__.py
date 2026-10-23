@@ -37,68 +37,22 @@ from wcf.records.text import *
 from wcf.records.attributes import *
 from wcf.records.elements import *
 
-import functools
 import itertools
-import re
 
 from wcf.dictionary import dictionary
-
-
-# XML 1.0 (fifth edition) NCName: a Name without ':'
-_NAME_START = ('A-Z_a-z\xc0-\xd6\xd8-\xf6\xf8-\u02ff\u0370-\u037d'
-               '\u037f-\u1fff\u200c\u200d\u2070-\u218f\u2c00-\u2fef'
-               '\u3001-\ud7ff\uf900-\ufdcf\ufdf0-\ufffd\U00010000-\U000effff')
-_NCNAME = re.compile('[%s][%s\\-.0-9\xb7\u0300-\u036f\u203f\u2040]*'
-                     % (_NAME_START, _NAME_START))
-# characters outside the XML 1.0 Char production
-_NOT_XML_CHAR = re.compile('[^\t\n\r\x20-\ud7ff\ue000-\ufffd'
-                           '\U00010000-\U0010ffff]')
-_TEXT_ESCAPES = str.maketrans({'&': '&amp;', '<': '&lt;', '>': '&gt;',
-                               '\r': '&#13;'})
-_ATTRIBUTE_ESCAPES = str.maketrans({'&': '&amp;', '<': '&lt;', '>': '&gt;',
-                                    '"': '&quot;', '\t': '&#9;',
-                                    '\n': '&#10;', '\r': '&#13;'})
-
-
-@functools.lru_cache(maxsize=1024)
-def _xml_name(name):
-    """A name or prefix, refused when it cannot be written as XML.
-
-    MC-NBFX only requires names to be nonempty and not "xmlns"; a name
-    that is not an NCName (e.g. 'a b="c"') would change the structure
-    of the rendered document.
-    """
-    if not _NCNAME.fullmatch(name):
-        raise ValueError('MC-NBFX name %r cannot be represented in XML'
-                         % (name,))
-    return name
-
-
-def _escape(value, table):
-    """Escape a value as MC-NBFX 2.2.3.13.1 interprets it.
-
-    Markup characters become entity references and characters that are
-    not legal in XML become "&#digits;". Line ends (and tabs and line
-    feeds in attributes) are written as character references too, so
-    that an XML parser's end-of-line and attribute-value normalization
-    does not change the characters the record represents.
-    """
-    value = value.translate(table)
-    if _NOT_XML_CHAR.search(value):
-        value = _NOT_XML_CHAR.sub(lambda m: '&#%d;' % ord(m.group()), value)
-    return value
+from wcf.xmltext import ncname, escape_text, escape_attribute, comment
 
 
 def _name(obj):
-    name = _xml_name(dictionary[obj.index] if not hasattr(obj, 'name')
+    name = ncname(dictionary[obj.index] if not hasattr(obj, 'name')
                      else obj.name)
     if hasattr(obj, 'prefix'):
-        return '%s:%s' % (_xml_name(obj.prefix), name)
+        return '%s:%s' % (ncname(obj.prefix), name)
     return name
 
 
 def _text(record):
-    return _escape(str(record), _TEXT_ESCAPES)
+    return escape_text(str(record))
 
 
 def _attr(record):
@@ -109,20 +63,12 @@ def _attr(record):
     elif isinstance(record, (XmlnsAttributeRecord,
                              DictionaryXmlnsAttributeRecord)):
         prefix = record.name if hasattr(record, 'name') else record.prefix
-        name = 'xmlns:' + _xml_name(prefix)
+        name = 'xmlns:' + ncname(prefix)
         value = dictionary[record.index] if hasattr(record, 'index') else record.value
     else:
         name = _name(record)
         value = str(record.value)
-    return ' %s="%s"' % (name, _escape(value, _ATTRIBUTE_ESCAPES))
-
-
-def _comment(record):
-    # XML comments cannot contain "--" nor end with "-"
-    if '--' in record.comment or record.comment.endswith('-'):
-        raise ValueError('MC-NBFX comment %r cannot be represented in XML'
-                         % (record.comment,))
-    return '<!--%s-->' % _escape(record.comment, {})
+    return ' %s="%s"' % (name, escape_attribute(value))
 
 
 _END = object()
@@ -156,7 +102,7 @@ def render_xml(records):
                 name, ''.join(_attr(a) for a in r.attributes)))
             stack.append((iter(r.childs), '</%s>' % name))
         elif isinstance(r, CommentRecord):
-            parts.append(_comment(r))
+            parts.append(comment(r.comment))
         elif isinstance(r, EndListTextRecord):
             raise ValueError('WCF EndListText without StartListText')
         elif isinstance(r, Text):
