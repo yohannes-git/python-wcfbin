@@ -29,11 +29,12 @@
 """Record classes, the document parser and its decoding quotas."""
 
 import dataclasses
+import struct
 import string
 from contextvars import ContextVar
 
 from wcf.errors import WcfBinaryError, binary_errors
-from wcf.datatypes import MultiByteInt31, Utf8String, read_mbi31, read_utf8, mbi31_bytes, utf8_bytes
+from wcf.datatypes import MultiByteInt31, Utf8String, read_exact, read_mbi31, read_utf8, mbi31_bytes, utf8_bytes
 from wcf.dictionary import dictionary
 from wcf.xmltext import comment, escape_attribute, ncname
 
@@ -554,6 +555,14 @@ class ArrayRecord(Record):
             item_records += records
             item_chars += chars
         charge(count * item_records, count * item_chars)
+        from wcf.records.text import _FixedSizeText
+        if item_class.parse.__func__ is _FixedSizeText.parse.__func__:
+            # fixed-size items without validation of their own: one read,
+            # one unpack (the count is already charged)
+            packer = struct.Struct(item_class._format)
+            data = read_exact(fp, count * packer.size)
+            return cls(element, [item_class(value) for (value,)
+                                 in packer.iter_unpack(data)], attributes)
         return cls(element, [item_class.parse(fp) for _ in range(count)], attributes)
 
     def __str__(self):
