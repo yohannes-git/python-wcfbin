@@ -115,14 +115,28 @@ class NbfseTests(unittest.TestCase):
             with self.subTest(data=data), self.assertRaises(ValueError):
                 BinaryXmlSession().parse_document(data)
 
-    def test_atomic_rollback_for_bad_xml_and_bad_encoding(self):
+    def test_rollback_for_bad_table_and_bad_encoding(self):
         s = BinaryXmlSession()
+        # a refused StringTable adds nothing
         with self.assertRaises(ValueError):
-            s.parse_document(encode_string_table(['good']) + b'\x40\x01r')
+            s.parse_document(encode_string_table(['good', 'good']) + b'\x40\x01r\x01')
+        with self.assertRaises(ValueError):
+            s.parse_document(b'\x05\x05goods')
         self.assertEqual({}, s.dictionary)
+        # nothing is sent, so nothing is added
         with self.assertRaises(ValueError):
             s.encode_xml('<unclosed>', new_strings=['good'])
         self.assertEqual({}, s.dictionary)
+
+    def test_table_of_a_refused_document_is_kept(self):
+        # the producer numbered "x" 1 and "y" 3 even if the document that
+        # follows their table is refused: "z" is then 5, not 1
+        s = BinaryXmlSession()
+        with self.assertRaises(ValueError):
+            s.parse_document(encode_string_table(['x', 'y']) + b'\x40\x01r')
+        self.assertEqual({1: 'x', 3: 'y'}, s.dictionary)
+        doc = s.parse_document(encode_string_table(['z']) + b'\x42\x01\x42\x05\x01\x01')
+        self.assertEqual('<x><z></z></x>', doc.render_xml())
 
     def test_limits_and_reset(self):
         s = BinaryXmlSession(max_table_bytes=5, max_document_bytes=500)
@@ -198,8 +212,8 @@ class NbfseSessionStateTests(unittest.TestCase):
                 b'\xaa\x01' * 300 + b'\x01')
         with self.assertRaisesRegex(ValueError, 'characters'):
             s.parse_document(wire)
-        self.assertEqual({}, s.dictionary)  # nothing committed
         from wcf.records import Quotas
+        s.reset()
         doc = s.parse_document(wire, Quotas(max_chars=None))
         self.assertEqual(18000007, len(doc.render_xml()))
 

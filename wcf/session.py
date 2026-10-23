@@ -13,7 +13,7 @@ from collections import ChainMap
 from contextlib import contextmanager
 from io import BytesIO
 
-from wcf.datatypes import MultiByteInt31, Utf8String
+from wcf.datatypes import MultiByteInt31, Utf8String, read_exact
 from wcf.dictionary import dictionary_context
 from wcf.records import DEFAULT_QUOTAS, Record, dump_records, render_xml
 from wcf.xml2records import XMLParser
@@ -142,32 +142,29 @@ class BinaryXmlSession:
 
     def parse_document(self, data, quotas=None):
         """Decode one MC-NBFSE document: its StringTable, then the records,
-        under ``quotas`` (the session's unless given). The session
-        dictionary is only extended once the whole document is valid."""
+        under ``quotas`` (the session's unless given).
+
+        The strings of a valid StringTable join the session dictionary even
+        if the document that follows is refused: the producer numbered
+        them, and the IDs of the following documents count them (MC-NBFSE
+        2.1, "A consumer of this format MUST maintain this mapping").
+        """
         if len(data) > self._max_document_bytes:
             raise ValueError('MC-NBFSE document size limit exceeded')
         fp = BytesIO(data)
         size = MultiByteInt31.parse(fp).value
         if size > self._max_table_bytes:
             raise ValueError('MC-NBFSE StringTable size limit exceeded')
-        table = fp.read(size)
-        if len(table) != size:
-            raise ValueError('Truncated MC-NBFSE StringTable')
-        table_fp = BytesIO(table)
+        table_fp = BytesIO(read_exact(fp, size))
         new_strings = []
         while table_fp.tell() < size:
             new_strings.append(Utf8String.parse(table_fp).value)
             if len(self._entries) + len(new_strings) > self._max_strings:
                 raise ValueError('MC-NBFSE session dictionary limit exceeded')
-        if table_fp.tell() != size:
-            raise ValueError('MC-NBFSE StringTable does not match declared size')
-        entries, reverse = self._new_entries(new_strings, size)
-        # Record.parse() resolves every dictionary reference, so a document
-        # referring to an unknown ID is refused before anything is committed.
-        with dictionary_context(ChainMap(entries, self._entries),
-                                ChainMap(reverse, self._value_to_id)):
+        self._commit(*self._new_entries(new_strings, size), size)
+        # Record.parse() resolves every dictionary reference
+        with self.context():
             records = Record.parse(fp, self.quotas if quotas is None else quotas)
-        self._commit(entries, reverse, size)
         return SessionDocument(records, new_strings, self._entries,
                                self._value_to_id)
 
