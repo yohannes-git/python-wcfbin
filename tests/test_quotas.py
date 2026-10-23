@@ -3,7 +3,6 @@
 import io
 import random
 import struct
-import time
 import unittest
 
 from wcf.datatypes import Decimal, MultiByteInt31, Utf8String
@@ -46,13 +45,14 @@ class QuotaTests(unittest.TestCase):
         # input would render as 1.2 GB
         refs = 50000
         wire = b'\x40\x01a' + b'\xaa\x01' * refs + b'\x01'
-        start = time.monotonic()
+        fp = io.BytesIO(wire)
         with dictionary_context({1: 'x' * 60000}):
             with self.assertRaisesRegex(ValueError, 'characters'):
-                parse(wire)
+                Record.parse(fp)
+            # refused after 280 references (16 MiB), not at the end
+            self.assertLess(fp.tell(), 1000)
             records = parse(b'\x40\x01a' + b'\xaa\x01' * 10 + b'\x01')
             self.assertEqual(600007, len(render_xml(records)))
-        self.assertLess(time.monotonic() - start, 2)
 
     def test_static_dictionary_amplification(self):
         # 0x48: "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd"
@@ -64,10 +64,11 @@ class QuotaTests(unittest.TestCase):
         # 2^30 Int64 items announced, 8 bytes given
         wire = (b'\x40\x01r\x03\x40\x01a\x01\x8f' +
                 MultiByteInt31(1 << 30).to_bytes() + b'\x00' * 8 + b'\x01')
-        start = time.monotonic()
+        fp = io.BytesIO(wire)
         with self.assertRaisesRegex(ValueError, 'records'):
-            parse(wire)
-        self.assertLess(time.monotonic() - start, 1)
+            Record.parse(fp)
+        # refused before reading any item
+        self.assertEqual(len(wire) - 9, fp.tell())
         with self.assertRaisesRegex(ValueError, 'characters'):
             parse(wire, Quotas(max_records=None))
 

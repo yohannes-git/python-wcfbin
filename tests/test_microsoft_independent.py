@@ -1,11 +1,4 @@
-"""Independent regression cases for python-wcfbin (against Microsoft MC-NBFX).
-
-Run in the extracted project root:
-    PYTHONPATH=. python -m unittest -v /path/to/test_microsoft_independent.py
-
-These were originally failing independent-audit cases and are now permanent
-regression checks for the corresponding conformity fixes.
-"""
+"""Regression cases against Microsoft MC-NBFX examples and rules."""
 import io
 import unittest
 

@@ -13,7 +13,7 @@ from wcf.datatypes import MultiByteInt31, Utf8String, Decimal
 from wcf.records import (
     ArrayRecord, BoolTextRecord, Chars8TextRecord, Chars16TextRecord,
     Chars32TextRecord, CommentRecord, DatetimeTextRecord, DecimalTextRecord,
-    DatetimeTextRecord, DoubleTextRecord, FloatTextRecord, Int16TextRecord, Int32TextRecord,
+    DoubleTextRecord, FloatTextRecord, Int16TextRecord, Int32TextRecord,
     Record, ShortAttributeRecord, ShortElementRecord, ShortXmlnsAttributeRecord,
     StartListTextRecord, TimeSpanTextRecord, UnicodeChars8TextRecord,
     dump_records, render_xml,

@@ -171,7 +171,7 @@ class NbfseTests(unittest.TestCase):
 
     def test_qname_and_dictionary_attribute_use_odd_ids(self):
         session = BinaryXmlSession()
-        # <r myattr="s" xmlns:p="urn:x">p:n</customRoot>
+        # <r myattr="s" xmlns:p="urn:x">p:n</r>
         table = encode_string_table(['myattr', 'urn:x', 'n'])
         wire = (table + b'\x40\x01r\x06\x01\x98\x01s\x0b\x01p\x03'
                 b'\xbc\x0f\x05\x01')
@@ -226,20 +226,30 @@ class NbfseSessionStateTests(unittest.TestCase):
             with self.subTest(text=text), self.assertRaises(ValueError):
                 BinaryXmlSession().encode_records([root])
 
-    def test_long_session_stays_linear(self):
+    def test_long_session_is_not_copied(self):
         # neither the session dictionary nor its reverse mapping is copied
         # or rebuilt per document or per lookup
-        import time
-        strings = ['s%d' % i for i in range(20000)]
+        from unittest import mock
+        import wcf.dictionary
+        strings = ['s%d' % i for i in range(2000)]
         sender, receiver = BinaryXmlSession(), BinaryXmlSession()
         receiver.parse_document(sender.encode_xml('<s0></s0>', new_strings=strings))
         xml = '<s1>' + ''.join('<s%d>s%d</s%d>' % (i, i + 1, i)
                                for i in range(2, 200)) + '</s1>'
-        start = time.monotonic()
-        for _ in range(200):
-            doc = receiver.parse_document(sender.encode_xml(xml))
-        self.assertEqual(xml, doc.render_xml())
-        self.assertLess(time.monotonic() - start, 10)
+        builds = []
+        original = wcf.dictionary._SessionMaps.reverse.fget
+
+        def reverse(maps):
+            if maps._reverse is None:
+                builds.append(1)
+            return original(maps)
+        with mock.patch.object(wcf.dictionary._SessionMaps, 'reverse',
+                               property(reverse)):
+            for _ in range(20):
+                doc = receiver.parse_document(sender.encode_xml(xml))
+                self.assertEqual(xml, doc.render_xml())
+        self.assertEqual([], builds)
+        self.assertIs(receiver._entries, doc._entries)
 
 
 if __name__ == '__main__':
