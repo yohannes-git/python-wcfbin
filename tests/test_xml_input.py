@@ -80,9 +80,14 @@ class XmlInputTests(unittest.TestCase):
                 Decimal(*args)
 
     def test_float_out_of_range(self):
-        records = XMLParser.parse('<f>1e39</f>', type_overrides={'/f': 'float'})
-        with self.assertRaises(ValueError):
-            dump_records(records)
+        # refused when the XML is read, not made INF nor left to dump_records()
+        for kind, text in (('float', '1e39'), ('float', '-3.5e38'),
+                           ('double', '1e400'), ('double', '-1e309')):
+            with self.subTest(kind=kind, text=text), self.assertRaises(ValueError):
+                XMLParser.parse('<f>%s</f>' % text, type_overrides={'/f': kind})
+        for kind, text in (('float', '3.40282347E+38'), ('double', 'INF'), ('float', '-INF')):
+            with self.subTest(kind=kind, text=text):
+                XMLParser.parse('<f>%s</f>' % text, type_overrides={'/f': kind})
 
     def test_length_prefixed_bounds(self):
         # Chars32Text and Bytes32Text have a signed INT32 length

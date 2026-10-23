@@ -7,7 +7,9 @@ type overrides are keyed by an XML namespace-aware path.
 
 
 import base64
+import math
 import re
+import struct
 from xml.parsers import expat
 
 from wcf.errors import WcfBinaryError, binary_errors
@@ -137,6 +139,15 @@ def _typed_text(value, kind):
             n = float('nan')
         elif re.fullmatch(r'[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][+-]?\d+)?', stripped):
             n = float(stripped)
+            # a finite literal beyond the range is refused, not made INF
+            # (a float rounds to float32, as .NET's float.MaxValue written
+            # "3.40282347E+38" does)
+            try:
+                if math.isinf(n) or kind == 'float' and math.isinf(
+                        struct.unpack('<f', struct.pack('<f', n))[0]):
+                    raise OverflowError
+            except OverflowError:
+                raise WcfBinaryError('%s out of range: %r' % (kind, value)) from None
         else:
             raise WcfBinaryError('Invalid floating-point literal %r' % value)
         return FloatTextRecord(n) if kind == 'float' else DoubleTextRecord(n)
