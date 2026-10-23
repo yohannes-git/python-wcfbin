@@ -80,23 +80,25 @@ NO_QUOTAS = Quotas(None, None, None)
 class _Budget(object):
     """What the document being decoded has used of its quotas."""
 
-    __slots__ = ('quotas', 'records', 'chars')
+    __slots__ = ('quotas', 'records', 'chars', '_max_records', '_max_chars')
 
     def __init__(self, quotas):
         self.quotas = quotas
         self.records = 0
         self.chars = 0
+        inf = float('inf')
+        self._max_records = inf if quotas.max_records is None else quotas.max_records
+        self._max_chars = inf if quotas.max_chars is None else quotas.max_chars
 
     def charge(self, records, chars):
         self.records += records
         self.chars += chars
-        quotas = self.quotas
-        if quotas.max_records is not None and self.records > quotas.max_records:
+        if self.records > self._max_records:
             raise WcfBinaryError('MC-NBFX document exceeds the quota of %d records'
-                             % quotas.max_records)
-        if quotas.max_chars is not None and self.chars > quotas.max_chars:
+                             % self.quotas.max_records)
+        if self.chars > self._max_chars:
             raise WcfBinaryError('MC-NBFX document exceeds the quota of %d characters'
-                             % quotas.max_chars)
+                             % self.quotas.max_chars)
 
 
 _budget = ContextVar('wcf_decoding_budget', default=None)
@@ -126,6 +128,7 @@ class Record(object):
                 raise RuntimeError('MC-NBFX record type 0x%02X registered twice'
                                    % r.type)
             Record.records[r.type] = r
+        _KINDS.clear()
 
     def to_bytes(self):
         """
@@ -160,68 +163,106 @@ class Record(object):
         if cls is not Record:
             return cls()
 
-        token = _budget.set(_Budget(quotas))
+        budget = _Budget(quotas)
+        token = _budget.set(budget)
         try:
             with binary_errors():
-                return cls._parse_document(fp, quotas.max_depth)
+                return cls._parse_document(fp, quotas.max_depth, budget)
         finally:
             _budget.reset(token)
 
     @staticmethod
-    def _parse_document(fp, max_depth):
+    def _parse_document(fp, max_depth, budget):
         root = []
         records = root
         parents = []  # pairs of (container, open element)
         open_element = None
+        read = fp.read
+        kinds = _KINDS
+        charge = budget.charge
+        if max_depth is None:
+            max_depth = float('inf')
         while True:
-            octet = fp.read(1)
+            octet = read(1)
             if not octet:
                 break
-            record_type = octet[0]
-            record_class = Record.records.get(record_type)
-            if record_class is not None:
-                obj = record_class.parse(fp)
-                _charge_record(obj)
-                if isinstance(obj, EndElementRecord):
-                    if not parents:
-                        raise WcfBinaryError('Unexpected EndElement')
-                    records, closed = parents.pop()
-                    closed._wcf_closure = 'explicit'
-                    open_element = parents[-1][1] if parents else None
-                elif isinstance(obj, Element):
-                    if max_depth is not None and len(parents) >= max_depth:
-                        raise WcfBinaryError('MC-NBFX document nested deeper than %d'
-                                         % max_depth)
-                    records.append(obj)
-                    parents.append((records, obj))
-                    records = obj.childs
-                    open_element = obj
-                elif isinstance(obj, Attribute):
-                    if not open_element or records is not open_element.childs or records:
-                        raise WcfBinaryError('Attribute outside element start')
-                    open_element.attributes.append(obj)
-                elif isinstance(obj, Text) and not obj.standalone:
-                    raise WcfBinaryError('EndListText without StartListText')
-                else:
-                    records.append(obj)
-                continue
-            # *TextWithEndElement: the text record type + 1 (MC-NBFX 2.2.3.31)
-            record_class = Record.records.get(record_type - 1)
-            if (not record_type & 1 or record_class is None or
-                    not issubclass(record_class, Text) or
-                    not record_class.with_end_element):
-                raise WcfBinaryError('Unknown or reserved WCF record 0x%02X' % record_type)
-            if not parents:
-                raise WcfBinaryError('TextWithEndElement outside an element')
+            kind = kinds.get(octet[0])
+            if kind is None:
+                kind = _record_kind(octet[0])
+            what, record_class = kind
             obj = record_class.parse(fp)
-            _charge_record(obj)
-            records.append(obj)
-            records, closed = parents.pop()
-            closed._wcf_closure = 'implicit'
-            open_element = parents[-1][1] if parents else None
+            if what is _TEXT:
+                charge(1, obj.char_count())
+                records.append(obj)
+            elif what is _ELEMENT:
+                charge(1, 2 * _name_chars(obj))  # start and end tags
+                if len(parents) >= max_depth:
+                    raise WcfBinaryError('MC-NBFX document nested deeper than %d'
+                                         % max_depth)
+                records.append(obj)
+                parents.append((records, obj))
+                records = obj.childs
+                open_element = obj
+            elif what is _TEXT_END:
+                if not parents:
+                    raise WcfBinaryError('TextWithEndElement outside an element')
+                charge(1, obj.char_count())
+                records.append(obj)
+                records, closed = parents.pop()
+                closed._wcf_closure = 'implicit'
+                open_element = parents[-1][1] if parents else None
+            elif what is _ATTRIBUTE:
+                charge(*_attribute_cost(obj))
+                if not open_element or records is not open_element.childs or records:
+                    raise WcfBinaryError('Attribute outside element start')
+                open_element.attributes.append(obj)
+            elif what is _END:
+                if not parents:
+                    raise WcfBinaryError('Unexpected EndElement')
+                records, closed = parents.pop()
+                closed._wcf_closure = 'explicit'
+                open_element = parents[-1][1] if parents else None
+            else:
+                _charge_record(obj)
+                records.append(obj)
         if parents:
             raise WcfBinaryError('Unterminated element in WCF Binary XML')
         return root
+
+
+# record type -> (kind, class), computed on first use and reset by
+# Record.add_records(): one dict lookup per record instead of an
+# isinstance() cascade
+_KINDS = {}
+_TEXT, _TEXT_END, _ELEMENT, _ATTRIBUTE, _END, _OTHER = (
+    'text', 'text+end', 'element', 'attribute', 'end', 'other')
+
+
+def _record_kind(record_type):
+    record_class = Record.records.get(record_type)
+    if record_class is not None:
+        if issubclass(record_class, EndElementRecord):
+            kind = _END
+        elif issubclass(record_class, Element):
+            kind = _ELEMENT
+        elif issubclass(record_class, Attribute):
+            kind = _ATTRIBUTE
+        elif issubclass(record_class, Text):
+            if not record_class.standalone:
+                raise WcfBinaryError('EndListText without StartListText')
+            kind = _TEXT
+        else:
+            kind = _OTHER
+    else:
+        # *TextWithEndElement: the type after that of its text record
+        record_class = Record.records.get(record_type - 1)
+        if (not record_type & 1 or record_class is None or
+                not issubclass(record_class, Text) or
+                not record_class.with_end_element):
+            raise WcfBinaryError('Unknown or reserved WCF record 0x%02X' % record_type)
+        kind = _TEXT_END
+    _KINDS[record_type] = kind, record_class
+    return kind, record_class
 
 
 class Element(Record):
