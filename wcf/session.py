@@ -124,8 +124,6 @@ class BinaryXmlSession:
         entries, reverse = {}, {}
         next_id = 2 * len(self._entries) + 1
         for string in strings:
-            if not isinstance(string, str):
-                raise TypeError('MC-NBFSE strings must be Unicode')
             # "Each String MUST be unique and MUST NOT have been present in
             # a prior StringTable."
             if string in self._value_to_id or string in reverse:
@@ -170,21 +168,7 @@ class BinaryXmlSession:
 
     def encode_records(self, records, new_strings=()):
         """Encode typed records, preserving their NBFX record types."""
-        new_strings = tuple(new_strings)
-        header = encode_string_table(new_strings)
-        table_size = sum(len(Utf8String(item).to_bytes()) for item in new_strings)
-        if table_size > self._max_table_bytes:
-            raise ValueError('MC-NBFSE StringTable size limit exceeded')
-        entries, reverse = self._new_entries(new_strings, table_size)
-        # serializing resolves every dictionary reference: an ID unknown
-        # to the peer cannot be written
-        with dictionary_context(ChainMap(entries, self._entries),
-                                ChainMap(reverse, self._value_to_id)):
-            data = header + dump_records(records)
-        if len(data) > self._max_document_bytes:
-            raise ValueError('MC-NBFSE document size limit exceeded')
-        self._commit(entries, reverse, table_size)
-        return data
+        return self._encode(new_strings, lambda: records)
 
     def encode_xml(self, xml, new_strings=(), type_overrides=None):
         """Encode XML using text by default and optional explicit types.
@@ -192,10 +176,27 @@ class BinaryXmlSession:
         ``new_strings`` may include element/attribute local names, namespace
         URIs or values. Previously registered strings are reused automatically.
         """
+        return self._encode(new_strings, lambda: XMLParser.parse(
+            xml, type_overrides=type_overrides, dictionary_text=True))
+
+    def _encode(self, new_strings, make_records):
+        """A document: the StringTable of ``new_strings``, then the records
+        made by ``make_records()`` with those strings already in use. The
+        strings join the session only if the document is produced."""
         new_strings = tuple(new_strings)
-        entries, reverse = self._new_entries(new_strings, 0)
+        if not all(isinstance(string, str) for string in new_strings):
+            raise TypeError('MC-NBFSE strings must be Unicode')
+        table = b''.join(Utf8String(string).to_bytes() for string in new_strings)
+        if len(table) > self._max_table_bytes:
+            raise ValueError('MC-NBFSE StringTable size limit exceeded')
+        entries, reverse = self._new_entries(new_strings, len(table))
+        # serializing resolves every dictionary reference: an ID unknown
+        # to the peer cannot be written
         with dictionary_context(ChainMap(entries, self._entries),
                                 ChainMap(reverse, self._value_to_id)):
-            records = XMLParser.parse(xml, type_overrides=type_overrides,
-                                      dictionary_text=True)
-        return self.encode_records(records, new_strings=new_strings)
+            data = (MultiByteInt31(len(table)).to_bytes() + table +
+                    dump_records(make_records()))
+        if len(data) > self._max_document_bytes:
+            raise ValueError('MC-NBFSE document size limit exceeded')
+        self._commit(entries, reverse, len(table))
+        return data

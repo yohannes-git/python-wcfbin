@@ -516,7 +516,7 @@ dictionary = {
 0x3CC : 'detail',
 }
 
-inverted_dict = dict([(v, k) for (k, v) in dictionary.items()])
+inverted_dict = {v: k for k, v in dictionary.items()}
 
 # MC-NBFS uses even IDs (the static dictionary); MC-NBFSE reserves odd IDs
 # for a dictionary negotiated incrementally across a session.  Keep the

@@ -28,12 +28,14 @@
 #  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
+"""MC-NBFX primitive types: MultiByteInt31, String, DECIMAL, and the
+reading of fixed-size fields."""
+
 import re
 import struct
-import logging
-import sys
 
-log = logging.getLogger(__name__)
+__all__ = ['MultiByteInt31', 'Utf8String', 'Decimal', 'read_exact',
+           'read_struct']
 
 
 def read_exact(fp, length):
@@ -84,39 +86,15 @@ class MultiByteInt31(object):
         >>> MultiByteInt31(0x3fffffff).to_bytes()
         b'\\xff\\xff\\xff\\xff\\x03'
         """
-        if not isinstance(self.value, int) or not 0 <= self.value <= 0x7fffffff:
+        value = self.value
+        if not isinstance(value, int) or not 0 <= value <= 0x7fffffff:
             raise ValueError('MultiByteInt31 must be an unsigned 31-bit integer')
-        value_a = self.value & 0x7F
-        value_b = (self.value >> 7) & 0x7F
-        value_c = (self.value >> 14) & 0x7F
-        value_d = (self.value >> 21) & 0x7F
-        value_e = (self.value >> 28) & 0x07
-        if value_e != 0:
-            ret = struct.pack(b'<BBBBB',
-                              value_a | 0x80,
-                              value_b | 0x80,
-                              value_c | 0x80,
-                              value_d | 0x80,
-                              value_e)
-        elif value_d != 0:
-            ret = struct.pack(b'<BBBB',
-                              value_a | 0x80,
-                              value_b | 0x80,
-                              value_c | 0x80,
-                              value_d)
-        elif value_c != 0:
-            ret = struct.pack(b'<BBB',
-                              value_a | 0x80,
-                              value_b | 0x80,
-                              value_c)
-        elif value_b != 0:
-            ret = struct.pack(b'<BB',
-                              value_a | 0x80,
-                              value_b)
-        else:
-            ret = struct.pack(b'<B',
-                              value_a)
-        return bytes(ret)
+        out = bytearray()
+        while value > 0x7F:
+            out.append(value & 0x7F | 0x80)
+            value >>= 7
+        out.append(value)
+        return bytes(out)
 
     def __str__(self):
         return str(self.value)
@@ -156,7 +134,6 @@ class MultiByteInt31(object):
                 if pos and value < (1 << (7 * pos)):
                     raise ValueError('Non-canonical MultiByteInt31 length')
                 return cls(value)
-        raise ValueError('Invalid MultiByteInt31')
 
 
 
