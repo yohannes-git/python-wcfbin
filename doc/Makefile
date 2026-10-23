@@ -37,7 +37,7 @@ clean:
 	-rm -rf $(BUILDDIR)/*
 
 record_list:
-	python2 source/listrecords.py
+	python3 source/listrecords.py
 	@mv record_list.rst source
 
 html: record_list
