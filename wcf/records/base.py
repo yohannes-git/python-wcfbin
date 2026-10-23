@@ -541,7 +541,7 @@ class ArrayRecord(Record):
         # every item stands for <name attributes>value</name>
         item_records, item_chars = 1, 2 * _name_chars(element) + item_class.max_chars
         for attribute in attributes:
-            records, chars = _attribute_cost(attribute)
+            records, chars = _attribute_cost(attribute, repeated=True)
             item_records += records
             item_chars += chars
         charge(count * item_records, count * item_chars)
@@ -603,11 +603,21 @@ def _name_chars(record):
     return count if record.prefix is None else count + len(record.prefix) + 1
 
 
-def _attribute_cost(record):
-    """(records, characters) of an attribute record and its value."""
+def _attribute_cost(record, repeated=False):
+    """(records, characters) of an attribute record and its value.
+
+    The items of a list value are charged as they are read; an attribute
+    ``repeated`` for every item of an array is rendered with all of them
+    each time, so its whole list counts for each item.
+    """
     if record.is_xmlns:
         return 1, len(record.prefix or '') + len(record.namespace)
-    return 2, _name_chars(record) + record.value.char_count()
+    value = record.value
+    items = getattr(value, 'values', None) if repeated else None
+    if items is not None:  # StartListText
+        return (2 + len(items), _name_chars(record) + len(items) +
+                sum(item.char_count() for item in items))
+    return 2, _name_chars(record) + value.char_count()
 
 
 Record.add_records((EndElementRecord, CommentRecord, ArrayRecord))

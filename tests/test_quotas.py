@@ -79,6 +79,19 @@ class QuotaTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'records'):
             parse(wire, Quotas(max_records=1000))
 
+    def test_array_attribute_list_counts_for_every_item(self):
+        # a list-valued attribute of an Array is rendered with every item:
+        # 1,000 list items x 1,000 array items, 3 KB of input
+        wire = (b'\x40\x01r\x03\x40\x01a\x04\x01b\xa4' + b'\x98\x01x' * 1000 +
+                b'\xa6\x01\x8d' + MultiByteInt31(1000).to_bytes() +
+                b'\x00' * 4000 + b'\x01')
+        with self.assertRaisesRegex(ValueError, 'characters|records'):
+            parse(wire, Quotas(max_chars=1000000, max_records=None))
+        with self.assertRaisesRegex(ValueError, 'records'):
+            parse(wire)
+        records = parse(wire, NO_QUOTAS)
+        self.assertGreater(len(render_xml(records)), 2000000)
+
     def test_array_in_attribute_position(self):
         # used to recurse without bound (RecursionError)
         for wire in (b'\x03\x40\x01a' * 5000, b'\x03\x42\x02' * 1000,
