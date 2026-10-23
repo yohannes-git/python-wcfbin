@@ -16,7 +16,8 @@ def main(argv=None):
     parser.add_argument('--nbfse', action='store_true',
                         help='read MC-NBFSE StringTable before NBFX document')
     parser.add_argument('--no-quotas', action='store_true',
-                        help='no decoding quotas (trusted input only)')
+                        help='no decoding quotas nor MC-NBFSE limits '
+                             '(trusted input only)')
     args = parser.parse_args(argv)
     quotas = NO_QUOTAS if args.no_quotas else DEFAULT_QUOTAS
     if args.source == '-':
@@ -26,7 +27,15 @@ def main(argv=None):
             data = fp.read()
     try:
         if args.nbfse:
-            xml = BinaryXmlSession().parse_document(data, quotas).render_xml()
+            if args.no_quotas:
+                # limits that the document cannot exceed
+                limit = len(data)
+                session = BinaryXmlSession(
+                    max_table_bytes=limit, max_strings=limit,
+                    max_document_bytes=limit, max_session_bytes=limit)
+            else:
+                session = BinaryXmlSession()
+            xml = session.parse_document(data, quotas).render_xml()
         else:
             xml = render_xml(Record.parse(BytesIO(data), quotas))
     except ValueError as error:

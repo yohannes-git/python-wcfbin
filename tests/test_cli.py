@@ -5,6 +5,8 @@ import subprocess
 import sys
 import unittest
 
+from wcf.session import encode_string_table
+
 TOP = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -51,6 +53,14 @@ class CliTests(unittest.TestCase):
         deep = b'\x40\x01a' * 100 + b'\x01' * 100
         self.assertEqual(1, run('wcf2xml.py', deep).returncode)
         self.assertEqual(0, run('wcf2xml.py', deep, '--no-quotas').returncode)
+        # the limits of the MC-NBFSE session too: a StringTable of 1.3 MB
+        # (1 MiB at most by default)
+        strings = ['%02d' % i + 's' * 16000 for i in range(80)]
+        document = encode_string_table(strings) + b'\x40\x01a\x01'
+        self.assertEqual(1, run('wcf2xml.py', document, '--nbfse').returncode)
+        result = run('wcf2xml.py', document, '--nbfse', '--no-quotas')
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(b'<a></a>', result.stdout)
 
 
 if __name__ == '__main__':
