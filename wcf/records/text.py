@@ -466,7 +466,13 @@ class DatetimeTextRecord(Text):
         self.tz = tz
 
     def __str__(self):
-        """DateTimeText lexical format (MC-NBFX 2.2.3.12)."""
+        """DateTimeText lexical format (MC-NBFX 2.2.3.12).
+
+        The time is always written: the text of 2.2.3.12 drops it at
+        midnight ("yyyy-MM-dd"), but the example of MC-NBFX section 3
+        ("2006-05-17T00:00:00") and .NET (XmlConverter.ToChars(DateTime))
+        do not.
+        """
         if not 0 <= self.value < 3155378976000000000:
             raise ValueError('DateTime ticks outside Microsoft MC-NBFX range')
         if self.tz not in (0, 1, 2):
@@ -475,11 +481,10 @@ class DatetimeTextRecord(Text):
         seconds, ticks = divmod(rem, 10000000)
         dt = (datetime.datetime(1, 1, 1) +
               datetime.timedelta(days=days, seconds=seconds))
-        text = '%04d-%02d-%02d' % (dt.year, dt.month, dt.day)
-        if seconds or ticks:
-            text += 'T%02d:%02d:%02d' % (dt.hour, dt.minute, dt.second)
-            if ticks:
-                text += '.' + ('%07d' % ticks).rstrip('0')
+        text = '%04d-%02d-%02dT%02d:%02d:%02d' % (
+            dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second)
+        if ticks:
+            text += '.' + ('%07d' % ticks).rstrip('0')
         if self.tz == 1:
             text += 'Z'
         elif self.tz == 2:
@@ -523,7 +528,7 @@ class DatetimeTextRecord(Text):
         '9999-12-31T23:59:59.9999999'
         >>> fp = BytesIO(b'\\x00\\x40\\x8E\\xF9\\x5B\\x47\\xC8\\x08')
         >>> str(DatetimeTextRecord.parse(fp))
-        '2006-05-17'
+        '2006-05-17T00:00:00'
         """
         data = read_struct(fp, '<Q')
         tz = data >> 62

@@ -35,8 +35,11 @@ class IndependentMicrosoftNbfxTests(unittest.TestCase):
         self.assertIn(b'8.0', wire)
         self.assertEqual('<version>8.0</version>', BinaryXmlSession().parse_document(wire).render_xml())
 
-    def test_datetime_midnight_as_in_normative_section_22312(self):
-        self.assertEqual('2006-05-17', str(DatetimeTextRecord(632834208000000000, 0)))
+    def test_datetime_midnight_as_in_section_3_example_and_dotnet(self):
+        # not the date alone of 2.2.3.12: see DatetimeTextRecord.__str__
+        self.assertEqual('2006-05-17T00:00:00', str(DatetimeTextRecord(632834208000000000, 0)))
+        self.assertEqual('<a>2006-05-17T00:00:00</a>',
+                         render_xml(parse_wire('40 01 61 97 00 40 8E F9 5B 47 C8 08')))
 
     def test_timespan_as_in_section_3_examples_and_dotnet(self):
         # not the "HH:mm:ss" of 2.2.3.23: see TimeSpanTextRecord.__str__

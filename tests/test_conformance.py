@@ -258,7 +258,7 @@ class BinaryFidelity(unittest.TestCase):
 
     def test_datetime_local_at_the_ends_of_the_range(self):
         # DateTime.MinValue and MaxValue with Kind=Local
-        for ticks, date in ((0, '0001-01-01'), (3155378975999999999,
+        for ticks, date in ((0, '0001-01-01T00:00:00'), (3155378975999999999,
                                                 '9999-12-31T23:59:59.9999999')):
             with self.subTest(ticks=ticks):
                 self.assertRegex(str(DatetimeTextRecord(ticks, 2)),
