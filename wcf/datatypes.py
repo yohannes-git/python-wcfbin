@@ -35,6 +35,34 @@ import sys
 log = logging.getLogger(__name__)
 
 
+def read_exact(fp, length):
+    """Read exactly ``length`` bytes, ValueError on truncated input.
+
+    >>> from io import BytesIO
+    >>> read_exact(BytesIO(b'abc'), 2)
+    b'ab'
+    >>> read_exact(BytesIO(b'a'), 2)
+    Traceback (most recent call last):
+    ...
+    ValueError: Truncated WCF binary data (expected 2 bytes, got 1)
+    """
+    data = fp.read(length)
+    if len(data) != length:
+        raise ValueError('Truncated WCF binary data (expected %d bytes, got %d)'
+                         % (length, len(data)))
+    return data
+
+
+def read_struct(fp, fmt):
+    """Read and unpack one fixed-size little-endian value.
+
+    >>> from io import BytesIO
+    >>> read_struct(BytesIO(b'\\xff\\xff'), '<h')
+    -1
+    """
+    return struct.unpack(fmt, read_exact(fp, struct.calcsize(fmt)))[0]
+
+
 class MultiByteInt31(object):
 
     def __init__(self, *args):
@@ -167,10 +195,7 @@ class Utf8String(object):
         über
         """
         length = MultiByteInt31.parse(fp).value
-        data = fp.read(length)
-        if len(data) != length:
-            raise ValueError('Truncated UTF-8 string')
-        return cls(data.decode('utf-8'))
+        return cls(read_exact(fp, length).decode('utf-8'))
 
 
 class Decimal(object):
@@ -223,16 +248,16 @@ class Decimal(object):
         >>> str(Decimal.parse(buf))
         '5.123456'
         """
-        reserved = fp.read(2)
+        reserved = read_exact(fp, 2)
         if reserved != b'\x00\x00':
             raise ValueError('Invalid reserved Decimal bits')
-        scale = struct.unpack(b'<B', fp.read(1))[0]
-        sign_byte = struct.unpack(b'<B', fp.read(1))[0]
+        scale = read_struct(fp, '<B')
+        sign_byte = read_struct(fp, '<B')
         if sign_byte not in (0, 0x80):
             raise ValueError('Invalid Decimal sign bits')
         sign = bool(sign_byte)
-        high = struct.unpack(b'<I', fp.read(4))[0]
-        low = struct.unpack(b'<Q', fp.read(8))[0]
+        high = read_struct(fp, '<I')
+        low = read_struct(fp, '<Q')
 
         return cls(sign, high, low, scale)
 

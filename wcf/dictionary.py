@@ -531,6 +531,15 @@ static_inverted_dict = inverted_dict
 _session_dictionary = ContextVar('wcf_nbfse_dictionary', default=None)
 
 
+class UnknownDictionaryId(KeyError, ValueError):
+    """A DictionaryString id that is neither in the static MC-NBFS
+    dictionary nor in the active MC-NBFSE session dictionary.
+
+    It is a ValueError like every other malformed input, and a KeyError
+    for the callers that look ids up directly.
+    """
+
+
 class _SessionDictionaryView(Mapping):
     def __init__(self, static, reverse=False):
         self._static = static
@@ -548,7 +557,10 @@ class _SessionDictionaryView(Mapping):
         # Static IDs take precedence where a string exists in both tables.
         if key in self._static:
             return self._static[key]
-        return self._dynamic()[key]
+        try:
+            return self._dynamic()[key]
+        except KeyError:
+            raise UnknownDictionaryId(key) from None
 
     def __iter__(self):
         yield from self._static

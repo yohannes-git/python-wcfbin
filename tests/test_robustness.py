@@ -6,7 +6,7 @@ import unittest
 from xml.sax.saxutils import escape
 from xml.etree import ElementTree as ET
 
-from wcf.records import Record, dump_records
+from wcf.records import Record, dump_records, render_xml
 from wcf.xml2records import XMLParser
 from wcf.session import BinaryXmlSession
 from wcf.records.text import QNameDictionaryTextRecord
@@ -53,10 +53,74 @@ class RobustnessTests(unittest.TestCase):
             blob = rng.randbytes(rng.randrange(0, 40))
             try:
                 records = Record.parse(io.BytesIO(blob))
-            except (ValueError, UnicodeError, KeyError, IndexError, TypeError,
-                    OverflowError, Exception):
+            except ValueError:
+                # every malformed input must be reported as ValueError
                 continue
             self.assertEqual(blob, dump_records(records), msg='iteration %d' % i)
+
+    @staticmethod
+    def all_text_document():
+        """A document with one record of every text type, as attribute
+        values and as content, a list and an array."""
+        from wcf.datatypes import Decimal
+        from wcf.records import (
+            ShortElementRecord, ShortAttributeRecord, ArrayRecord,
+            ZeroTextRecord, OneTextRecord, FalseTextRecord, TrueTextRecord,
+            Int8TextRecord, Int16TextRecord, Int32TextRecord, Int64TextRecord,
+            UInt64TextRecord, FloatTextRecord, DoubleTextRecord,
+            DecimalTextRecord, DatetimeTextRecord, Chars8TextRecord,
+            Chars16TextRecord, Chars32TextRecord, Bytes8TextRecord,
+            Bytes16TextRecord, Bytes32TextRecord, StartListTextRecord,
+            EmptyTextRecord, DictionaryTextRecord, UniqueIdTextRecord,
+            UuidTextRecord, TimeSpanTextRecord, BoolTextRecord,
+            UnicodeChars8TextRecord, UnicodeChars16TextRecord,
+            UnicodeChars32TextRecord, QNameDictionaryTextRecord)
+        uuid = '33221100-5544-7766-8899-aabbccddeeff'
+        texts = [
+            ZeroTextRecord(), OneTextRecord(), FalseTextRecord(),
+            TrueTextRecord(), Int8TextRecord(-1), Int16TextRecord(-32768),
+            Int32TextRecord(2147483647), Int64TextRecord(1 << 40),
+            UInt64TextRecord((1 << 64) - 1), FloatTextRecord(1.5),
+            DoubleTextRecord(2.5), DecimalTextRecord(Decimal(False, 0, 5123456, 6)),
+            DatetimeTextRecord(632834208000000000, 1), Chars8TextRecord('abc'),
+            Chars16TextRecord('abc'), Chars32TextRecord('abc'),
+            Bytes8TextRecord(b'\x01\x02'), Bytes16TextRecord(b'\x01\x02'),
+            Bytes32TextRecord(b'\x01\x02'),
+            StartListTextRecord([Int8TextRecord(1), TrueTextRecord()]),
+            EmptyTextRecord(), DictionaryTextRecord(2), UniqueIdTextRecord(uuid),
+            UuidTextRecord(uuid), TimeSpanTextRecord(-3440000000),
+            BoolTextRecord(True), UnicodeChars8TextRecord('ab'),
+            UnicodeChars16TextRecord('ab'), UnicodeChars32TextRecord('ab'),
+            QNameDictionaryTextRecord('b', 2)]
+        root = ShortElementRecord('r')
+        for i, text in enumerate(texts):
+            root.attributes.append(ShortAttributeRecord('a%d' % i, text))
+        content = ShortElementRecord('c')
+        content.childs.extend(texts)
+        root.childs.append(content)
+        root.childs.append(ArrayRecord(ShortElementRecord('i'),
+                                       [Int32TextRecord(1), Int32TextRecord(2)], []))
+        return dump_records([root])
+
+    def test_truncated_input_raises_value_error(self):
+        data = self.all_text_document()
+        self.assertEqual(data, dump_records(Record.parse(io.BytesIO(data))))
+        for cut in range(1, len(data)):
+            with self.subTest(cut=cut), self.assertRaises(ValueError):
+                Record.parse(io.BytesIO(data[:cut]))
+
+    def test_mutated_input_raises_only_value_error(self):
+        data = self.all_text_document()
+        rng = random.Random(0x5EED)
+        for i in range(3000):
+            blob = bytearray(data)
+            for _ in range(rng.randrange(1, 4)):
+                blob[rng.randrange(len(blob))] = rng.randrange(256)
+            try:
+                records = Record.parse(io.BytesIO(bytes(blob)))
+                render_xml(records)
+            except ValueError:
+                continue
 
     def test_float_and_decimal_as_lexical_strings(self):
         for literal in ['8.0', '1.0.0', '0.00001', '0001', 'NaN', 'true',

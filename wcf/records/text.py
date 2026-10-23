@@ -41,13 +41,6 @@ from xml.sax.saxutils import escape
 log = logging.getLogger(__name__)
 
 
-def _read_exact(fp, length):
-    data = fp.read(length)
-    if len(data) != length:
-        raise ValueError('Truncated WCF text record (expected %d bytes)' % length)
-    return data
-
-
 def _positive_int32_length(length, record_name):
     """MC-NBFX Chars32/Bytes32 store a *positive signed* INT32 length."""
     if not 0 < length <= 0x7fffffff:
@@ -177,7 +170,7 @@ class Int8TextRecord(Text):
         >>> Int8TextRecord.parse(fp).value
         -1
         """
-        return cls(struct.unpack(b'<b', fp.read(1))[0])
+        return cls(read_struct(fp, '<b'))
 
 
 class Int16TextRecord(Int8TextRecord):
@@ -199,7 +192,7 @@ class Int16TextRecord(Int8TextRecord):
         >>> Int16TextRecord.parse(fp).value
         -1
         """
-        return cls(struct.unpack(b'<h', fp.read(2))[0])
+        return cls(read_struct(fp, '<h'))
 
 
 class Int32TextRecord(Int8TextRecord):
@@ -221,7 +214,7 @@ class Int32TextRecord(Int8TextRecord):
         >>> Int32TextRecord.parse(fp).value
         -1
         """
-        return cls(struct.unpack(b'<i', fp.read(4))[0])
+        return cls(read_struct(fp, '<i'))
 
 
 class Int64TextRecord(Int8TextRecord):
@@ -243,7 +236,7 @@ class Int64TextRecord(Int8TextRecord):
         >>> Int64TextRecord.parse(fp).value
         -1
         """
-        return cls(struct.unpack(b'<q', fp.read(8))[0])
+        return cls(read_struct(fp, '<q'))
 
 
 class UInt64TextRecord(Int64TextRecord):
@@ -265,7 +258,7 @@ class UInt64TextRecord(Int64TextRecord):
         >>> int(UInt64TextRecord.parse(fp).value)
         18446744073709551615
         """
-        return cls(struct.unpack(b'<Q', fp.read(8))[0])
+        return cls(read_struct(fp, '<Q'))
 
 
 class BoolTextRecord(Text):
@@ -299,7 +292,7 @@ class BoolTextRecord(Text):
         >>> BoolTextRecord.parse(fp).value
         True
         """
-        byte = struct.unpack(b'<B', fp.read(1))[0]
+        byte = read_struct(fp, '<B')
         if byte not in (0, 1):
             raise ValueError('Invalid BoolText value %d' % byte)
         return cls(bool(byte))
@@ -342,8 +335,8 @@ class UnicodeChars8TextRecord(Text):
         >>> str(UnicodeChars8TextRecord.parse(fp))
         'abc'
         """
-        ln = struct.unpack(b'<B', fp.read(1))[0]
-        data = _read_exact(fp, ln)
+        ln = read_struct(fp, '<B')
+        data = read_exact(fp, ln)
         return cls(data.decode('utf-16le'))
 
 
@@ -371,8 +364,8 @@ class UnicodeChars16TextRecord(UnicodeChars8TextRecord):
         >>> str(UnicodeChars16TextRecord.parse(fp))
         'abc'
         """
-        ln = struct.unpack(b'<H', fp.read(2))[0]
-        data = _read_exact(fp, ln)
+        ln = read_struct(fp, '<H')
+        data = read_exact(fp, ln)
         return cls(data.decode('utf-16le'))
 
 
@@ -403,7 +396,7 @@ class UnicodeChars32TextRecord(UnicodeChars8TextRecord):
         ln = MultiByteInt31.parse(fp).value
         if ln % 2:
             raise ValueError('UTF-16 byte length must be even')
-        data = _read_exact(fp, ln)
+        data = read_exact(fp, ln)
         return cls(data.decode('utf-16le'))
 
 
@@ -441,7 +434,7 @@ class QNameDictionaryTextRecord(Text):
         >>> str(QNameDictionaryTextRecord.parse(fp))
         'b:Envelope'
         """
-        prefix_index = struct.unpack(b'<B', _read_exact(fp, 1))[0]
+        prefix_index = read_struct(fp, '<B')
         if prefix_index >= 26:
             raise ValueError('Invalid QNameDictionaryText prefix index')
         prefix = chr(prefix_index + ord('a'))
@@ -483,7 +476,7 @@ class FloatTextRecord(Text):
         >>> FloatTextRecord.parse(fp).value
         1.3370000123977661
         """
-        value = struct.unpack(b'<f', fp.read(4))[0]
+        value = read_struct(fp, '<f')
         return cls(value)
 
 
@@ -521,7 +514,7 @@ class DoubleTextRecord(FloatTextRecord):
         >>> DoubleTextRecord.parse(fp).value
         1.337
         """
-        value = struct.unpack(b'<d', fp.read(8))[0]
+        value = read_struct(fp, '<d')
         return cls(value)
 
 
@@ -620,7 +613,7 @@ class DatetimeTextRecord(Text):
         >>> str(DatetimeTextRecord.parse(fp))
         '2006-05-17'
         """
-        data = struct.unpack(b'<Q', fp.read(8))[0]
+        data = read_struct(fp, '<Q')
         tz = data >> 62
         value = data & 0x3FFFFFFFFFFFFFFF
 
@@ -667,8 +660,8 @@ class Chars8TextRecord(Text):
         >>> str(Chars8TextRecord.parse(fp))
         'test'
         """
-        ln = struct.unpack(b'<B', fp.read(1))[0]
-        value = _read_exact(fp, ln).decode('utf-8')
+        ln = read_struct(fp, '<B')
+        value = read_exact(fp, ln).decode('utf-8')
         return cls(value)
 
 
@@ -695,8 +688,8 @@ class Chars16TextRecord(Chars8TextRecord):
         >>> str(Chars16TextRecord.parse(fp))
         'test'
         """
-        ln = struct.unpack(b'<H', fp.read(2))[0]
-        value = _read_exact(fp, ln).decode('utf-8')
+        ln = read_struct(fp, '<H')
+        value = read_exact(fp, ln).decode('utf-8')
         return cls(value)
 
 
@@ -723,9 +716,9 @@ class Chars32TextRecord(Chars8TextRecord):
         >>> str(Chars32TextRecord.parse(fp))
         'test'
         """
-        ln = struct.unpack(b'<i', _read_exact(fp, 4))[0]
+        ln = read_struct(fp, '<i')
         _positive_int32_length(ln, 'Chars32Text')
-        value = _read_exact(fp, ln).decode('utf-8')
+        value = read_exact(fp, ln).decode('utf-8')
         return cls(value)
 
 
@@ -760,7 +753,7 @@ class UniqueIdTextRecord(Text):
         >>> str(UniqueIdTextRecord.parse(fp))
         'urn:uuid:33221100-5544-7766-8899-aabbccddeeff'
         """
-        u = fp.read(16)
+        u = read_exact(fp, 16)
 
         return cls(bytes_le=u)
 
@@ -808,8 +801,8 @@ class Bytes8TextRecord(Text):
         >>> bytes(Bytes8TextRecord.parse(fp).value)
         b'abc'
         """
-        ln = struct.unpack(b'<B', fp.read(1))[0]
-        data = _read_exact(fp, ln)
+        ln = read_struct(fp, '<B')
+        data = read_exact(fp, ln)
         return cls(data)
 
 
@@ -838,8 +831,8 @@ class Bytes16TextRecord(Bytes8TextRecord):
         >>> bytes(Bytes16TextRecord.parse(fp).value)
         b'abc'
         """
-        ln = struct.unpack(b'<H', fp.read(2))[0]
-        data = _read_exact(fp, ln)
+        ln = read_struct(fp, '<H')
+        data = read_exact(fp, ln)
         return cls(data)
 
 
@@ -868,9 +861,9 @@ class Bytes32TextRecord(Bytes8TextRecord):
         >>> bytes(Bytes32TextRecord.parse(fp).value)
         b'abc'
         """
-        ln = struct.unpack(b'<i', _read_exact(fp, 4))[0]
+        ln = read_struct(fp, '<i')
         _positive_int32_length(ln, 'Bytes32Text')
-        data = _read_exact(fp, ln)
+        data = read_exact(fp, ln)
         return cls(data)
 
 
@@ -955,7 +948,7 @@ class TimeSpanTextRecord(Text):
         >>> str(TimeSpanTextRecord.parse(fp))
         '00:00:03.6'
         """
-        value = struct.unpack(b'<q', fp.read(8))[0]
+        value = read_struct(fp, '<q')
         return cls(value)
 
 
