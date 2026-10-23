@@ -123,6 +123,8 @@ section 3 and the .NET implementation, the examples and .NET are followed:
   .NET's XmlConvert.ToString(TimeSpan), not as `[d.]HH:mm:ss`.
 * DateTimeText (2.2.3.12): the time is always written
   (`2006-05-17T00:00:00`), also at midnight.
+* DecimalText (2.2.3.11): written with its scale (`1.50`), the "least
+  number of digits that exactly reproduces" the DECIMAL, as .NET does.
 * DateTimeText with TZ=2 (local): the field holds the UTC ticks, as .NET's
   DateTime.ToBinary() writes them (the text does not say which ticks a
   local time stores); it is rendered as the local time of the decoding
@@ -133,7 +135,6 @@ Known differences with .NET where the text is followed:
 * FloatText/DoubleText: exponential notation outside of the significant
   digits, e.g. 100 is `1E+2` (.NET writes `100`).
 * MultiByteInt31: a non-minimal encoding is refused (.NET accepts it).
-* DecimalText: trailing zeros are not written (`1.5` for 1.50).
 
 ### Sessionful MC-NBFSE (in-band StringTable)
 

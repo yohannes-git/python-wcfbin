@@ -85,7 +85,7 @@ class TextRepresentations(unittest.TestCase):
 
     def test_decimal_reserved_bits_are_ignored(self):
         # [MS-OAUT] 2.2.26: wReserved "MUST be ignored by the recipient"
-        self.assertEqual('<a>1.5</a>', render_xml(decode(bytes.fromhex(
+        self.assertEqual('<a>1.50</a>', render_xml(decode(bytes.fromhex(
             '40 01 61 94 01 00 02 00 00 00 00 00 96 00 00 00 00 00 00 00 01'))))
         for wire in ('40 01 61 94 00 00 1d 00' + ' 00' * 12 + ' 01',  # scale 29
                      '40 01 61 94 00 00 00 01' + ' 00' * 12 + ' 01'):  # sign 1

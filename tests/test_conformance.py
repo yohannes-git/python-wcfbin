@@ -296,7 +296,7 @@ class BinaryFidelity(unittest.TestCase):
     def test_decimal_less_than_one(self):
         self.assertEqual('0.001', str(Decimal(False, 0, 1, 3)))
         self.assertEqual('-0.01', str(Decimal(True, 0, 1, 2)))
-        self.assertEqual('1.23', str(Decimal(False, 0, 12300, 4)))
+        self.assertEqual('1.2300', str(Decimal(False, 0, 12300, 4)))  # the scale is kept
 
     def test_nan_lexical_casing(self):
         self.assertEqual('NaN', str(DoubleTextRecord(float('nan'))))

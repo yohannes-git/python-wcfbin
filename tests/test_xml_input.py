@@ -44,7 +44,7 @@ class XmlInputTests(unittest.TestCase):
 
     def test_decimal_type(self):
         types = {'/d': 'decimal'}
-        for text, scale, rendered in (('1.50', 2, '1.5'), ('-.5', 1, '-0.5'),
+        for text, scale, rendered in (('1.50', 2, '1.50'), ('-.5', 1, '-0.5'),
                                       ('79228162514264337593543950335', 0,
                                        '79228162514264337593543950335')):
             with self.subTest(text=text):

@@ -17,7 +17,8 @@ Behaviour changes:
   that XML cannot carry.
 * TimeSpanText is rendered as an xsd:duration, DateTimeText always with its
   time, FloatText/DoubleText with the shortest round-trip digits and `0.5`
-  rather than `5E-1`, DecimalText `-0` as `0`.
+  rather than `5E-1`, DecimalText with its scale (`1.50`) and `-0` as `0`,
+  a local DateTimeText from its UTC ticks as .NET writes them.
 * UnicodeChars32Text has a 4-byte INT32 length.
 * Every data error raises `wcf.errors.WcfBinaryError` (a `ValueError`);
   constructors refuse extra arguments and values of the wrong type

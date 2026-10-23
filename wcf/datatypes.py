@@ -201,7 +201,7 @@ class Decimal(object):
         fit in a DECIMAL).
 
         >>> str(Decimal.from_string('-12.50'))
-        '-12.5'
+        '-12.50'
         >>> Decimal.from_string('1E+999999999')
         Traceback (most recent call last):
         ...
@@ -232,31 +232,33 @@ class Decimal(object):
                            self.high, self.low)
 
     def __str__(self):
-        """
+        """The value with exactly ``scale`` decimal places.
+
+        The scale is part of a DECIMAL: 1.50 (150, scale 2) and 1.5 (15,
+        scale 1) are different representations, and MC-NBFX 2.2.3.11 asks
+        for "the least number of digits that exactly reproduces" it; .NET
+        writes the scale too, so that a value survives a round trip.
+
         >>> str(Decimal(False, 0, 1234, 3))
         '1.234'
-        >>> str(Decimal(False, 0, 1234, 1))
-        '123.4'
         >>> str(Decimal(True, 0, 1234, 1))
         '-123.4'
         >>> str(Decimal(False, 0, 5123456, 6))
         '5.123456'
+        >>> str(Decimal(False, 0, 150, 2)), str(Decimal(False, 0, 1, 3))
+        ('1.50', '0.001')
 
-        A negative zero is written "0", as .NET does (the text of MC-NBFX
-        2.2.3.11 does not cover it):
+        A negative zero is written without its sign, as .NET does:
 
         >>> str(Decimal(True, 0, 0, 2))
-        '0'
+        '0.00'
         """
-        if not self.high and not self.low:
-            return '0'
-        value = str(self.high * 2**64 + self.low)
-        if self.scale > 0:
-            value = value.zfill(self.scale + 1)
-            value = (value[:-self.scale] + '.' + value[-self.scale:]).rstrip('0').rstrip('.')
-        if self.sign:
-            value = '-%s' % value
-        return value
+        digits = str((self.high << 64) | self.low).rjust(self.scale + 1, '0')
+        if self.scale:
+            digits = digits[:-self.scale] + '.' + digits[-self.scale:]
+        if self.sign and (self.high or self.low):
+            digits = '-' + digits
+        return digits
 
     @classmethod
     def parse(cls, fp):
