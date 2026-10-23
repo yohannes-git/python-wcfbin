@@ -122,6 +122,7 @@ class _FixedSizeText(Text):
     (``_format``), rendered with str() unless the class says otherwise."""
     _format = None
     _value_types = (int,)  # bool excluded
+    _array_unpack = True  # False in a subclass with its own parse()
 
     def __init__(self, value):
         if value.__class__ is bool or not isinstance(value, self._value_types):
@@ -229,24 +230,28 @@ class _ConstantText(Text):
 
 class ZeroTextRecord(_ConstantText):
     type = 0x80
+    xml_safe = True
     text = '0'
     max_chars = 1
 
 
 class OneTextRecord(_ConstantText):
     type = 0x82
+    xml_safe = True
     text = '1'
     max_chars = 1
 
 
 class FalseTextRecord(_ConstantText):
     type = 0x84
+    xml_safe = True
     text = 'false'
     max_chars = 5
 
 
 class TrueTextRecord(_ConstantText):
     type = 0x86
+    xml_safe = True
     text = 'true'
     max_chars = 4
 
@@ -283,6 +288,7 @@ class UInt64TextRecord(_FixedSizeText):
 
 class BoolTextRecord(Text):
     type = 0xB4
+    xml_safe = True
     max_chars = 5
 
     def __init__(self, value):
@@ -435,6 +441,7 @@ class QNameDictionaryTextRecord(Text):
 
 class FloatTextRecord(_FixedSizeText):
     type = 0x90
+    xml_safe = True
     max_chars = 15
     _format = '<f'
     _value_types = (int, float)
@@ -455,6 +462,7 @@ class FloatTextRecord(_FixedSizeText):
 
 class DoubleTextRecord(_FixedSizeText):
     type = 0x92
+    xml_safe = True
     max_chars = 24
     _format = '<d'
     _value_types = (int, float)
@@ -537,6 +545,7 @@ class DatetimeTextRecord(Text):
     (checked against .NET Framework 4.8.1).
     """
     type = 0x96
+    xml_safe = True
     max_chars = 33
 
     def __init__(self, value, tz):
@@ -641,6 +650,7 @@ class Chars32TextRecord(_Utf8Text):
 
 class UniqueIdTextRecord(Text):
     type = 0xAC
+    xml_safe = True
     max_chars = 45
 
     def __init__(self, *args, **kwargs):
@@ -678,6 +688,7 @@ class UniqueIdTextRecord(Text):
 
 class UuidTextRecord(UniqueIdTextRecord):
     type = 0xB0
+    xml_safe = True
     max_chars = 36
 
     def __str__(self):
@@ -721,15 +732,18 @@ class _BytesText(_LengthPrefixedText):
 
 class Bytes8TextRecord(_BytesText):
     type = 0x9E
+    xml_safe = True
 
 
 class Bytes16TextRecord(_BytesText):
     type = 0xA0
+    xml_safe = True
     _length_format = '<H'
 
 
 class Bytes32TextRecord(_BytesText):
     type = 0xA2
+    xml_safe = True
     _length_format = '<i'
     _positive = True
 
@@ -787,6 +801,7 @@ class EndListTextRecord(Text):
 
 class EmptyTextRecord(Text):
     type = 0xA8
+    xml_safe = True
     max_chars = 0
 
     def __str__(self):
@@ -795,6 +810,7 @@ class EmptyTextRecord(Text):
 
 class TimeSpanTextRecord(_FixedSizeText):
     type = 0xAE
+    xml_safe = True
     max_chars = 27
     _format = '<q'
 

@@ -47,20 +47,9 @@ __all__ = (base.__all__ + text.__all__ + attributes.__all__ + elements.__all__ +
 _END = object()
 
 
-# text records whose str() never needs escaping (base64, floats, dates):
-# exact classes, a subclass may render differently, and only those whose
-# str() is made by this code whatever their value (a hand-made
-# Int32TextRecord('<x/>') or DecimalTextRecord('<x/>') is escaped: they
-# write str(value), and integers are short to scan anyway)
-_SAFE_TEXT = frozenset((
-    ZeroTextRecord, OneTextRecord, FalseTextRecord, TrueTextRecord,
-    BoolTextRecord, FloatTextRecord, DoubleTextRecord, DatetimeTextRecord,
-    UniqueIdTextRecord, UuidTextRecord, Bytes8TextRecord, Bytes16TextRecord,
-    Bytes32TextRecord, EmptyTextRecord, TimeSpanTextRecord))
-
-
 def _text_xml(record):
-    if record.__class__ in _SAFE_TEXT:
+    # the class itself must declare xml_safe: a subclass may write anything
+    if record.__class__.__dict__.get('xml_safe'):
         return str(record)
     return escape_text(str(record))
 

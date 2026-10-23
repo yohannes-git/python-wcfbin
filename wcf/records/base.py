@@ -34,8 +34,8 @@ import string
 from contextvars import ContextVar
 
 from wcf.errors import WcfBinaryError, binary_errors
-from wcf.datatypes import (MultiByteInt31, mbi31_bytes, read_exact, read_mbi31,
-                           read_utf8, utf8_bytes)
+from wcf.datatypes import (mbi31_bytes, read_exact, read_mbi31, read_utf8,
+                           utf8_bytes)
 from wcf.dictionary import dictionary
 from wcf.xmltext import comment, escape_attribute, ncname
 
@@ -302,6 +302,12 @@ class Text(Record):
     standalone = True
     with_end_element = True
     _kind = _TEXT
+    # str() never needs XML escaping, whatever the value (declared by the
+    # class itself: a subclass may write anything)
+    xml_safe = False
+    # the items of an Array of this type are read at once with struct
+    # (_FixedSizeText without a parse() of its own)
+    _array_unpack = False
 
     def char_count(self):
         """The number of characters represented, or an upper bound."""
@@ -400,10 +406,16 @@ class _NamedRecord(Record):
 
     @classmethod
     def _read_names(cls, fp):
-        names = [read_utf8(fp)] if cls._has_prefix else []
-        names.append(read_mbi31(fp) if cls._by_index
-                     else read_utf8(fp))
-        return names
+        return read_names(fp, cls._has_prefix, cls._by_index)
+
+
+def read_names(fp, has_prefix, by_index):
+    """The names of an element or attribute record, or the prefix and
+    namespace of an xmlns record: a String prefix (has_prefix), then a
+    String or a DictionaryString (by_index)."""
+    names = [read_utf8(fp)] if has_prefix else []
+    names.append(read_mbi31(fp) if by_index else read_utf8(fp))
+    return names
 
 
 class LetterPrefix(object):
@@ -510,7 +522,7 @@ class ArrayRecord(Record):
             out += attribute.to_bytes()
         out.append(EndElementRecord.type)
         out.append(self._check())
-        out += MultiByteInt31(len(self.data)).to_bytes()
+        out += mbi31_bytes(len(self.data))
         for item in self.data:
             out += item.to_bytes()[1:]
         return bytes(out)
@@ -567,8 +579,7 @@ class ArrayRecord(Record):
             item_records += records
             item_chars += chars
         charge(count * item_records, count * item_chars)
-        from wcf.records.text import _FixedSizeText
-        if item_class.parse.__func__ is _FixedSizeText.parse.__func__:
+        if item_class._array_unpack:
             # fixed-size items without validation of their own: one read,
             # one unpack (the count is already charged)
             packer = struct.Struct(item_class._format)
