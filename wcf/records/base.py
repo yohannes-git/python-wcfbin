@@ -394,17 +394,19 @@ class ArrayRecord(Record):
             octet = fp.read(1)
             if len(octet) != 1:
                 raise ValueError('Truncated ArrayRecord attributes')
-            type = octet[0]
-            record_class = Record.records.get(type)
-            if record_class is None:
-                raise ValueError('Unknown ArrayRecord attribute type 0x%02X' % type)
-            obj = record_class.parse(fp)
-            if isinstance(obj, EndElementRecord):
+            record_type = octet[0]
+            if record_type == EndElementRecord.type:
                 break
-            elif isinstance(obj, Attribute):
-                attributes.append(obj)
-            else:
-                raise ValueError('unknown type: %s' % hex(type))
+            # the type is checked before the record is read: another Array
+            # here would recurse without bound
+            record_class = Record.records.get(record_type)
+            if record_class is None or not issubclass(record_class, Attribute):
+                raise ValueError('Invalid ArrayRecord attribute record 0x%02X'
+                                 % record_type)
+            attribute = record_class.parse(fp)
+            # charged as they are read, not once all are allocated
+            charge(*_attribute_cost(attribute))
+            attributes.append(attribute)
         octet = fp.read(1)
         if len(octet) != 1:
             raise ValueError('Truncated ArrayRecord data type')
