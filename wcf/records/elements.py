@@ -41,7 +41,6 @@ import struct
 import logging
 
 log = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
 
 from wcf.datatypes import *
 from wcf.records.base import *

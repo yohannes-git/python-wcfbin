@@ -41,7 +41,6 @@ import uuid
 from xml.sax.saxutils import escape
 
 log = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
 
 
 def _read_exact(fp, length):
