@@ -58,6 +58,12 @@ class XmlInputTests(unittest.TestCase):
             with self.subTest(xml=xml), self.assertRaises(ValueError):
                 XMLParser.parse(xml)
 
+    def test_empty_prefix(self):
+        # ":a" is not a qualified name, the colon is not dropped
+        for xml in ('<:a xmlns="urn:x"/>', '<a xmlns="urn:x" :b="1"/>'):
+            with self.subTest(xml=xml), self.assertRaises(ValueError):
+                XMLParser.parse(xml)
+
     def test_typed_literals_are_xml_schema_literals(self):
         # only XML whitespace around a value, only ASCII digits, as .NET's
         # XmlConvert: Unicode spaces and digits of other scripts are refused

@@ -48,11 +48,11 @@ def _named_record(qname, families, *value):
     """The most compact element or attribute record for an XML qualified
     name: a dictionary name when the active dictionaries have it, the
     single letter prefix records for a prefix a to z."""
-    prefix, _, name = qname.rpartition(':')
+    prefix, colon, name = qname.rpartition(':')
     ncname(name)
     index = inverted_dict.get(name)
     by_index = index is not None
-    if not prefix:
+    if not colon:
         return families[0][by_index](index if by_index else name, *value)
     ncname(prefix)
     if len(prefix) == 1 and 'a' <= prefix <= 'z':
