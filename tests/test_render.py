@@ -61,6 +61,19 @@ class RenderInjectionTests(unittest.TestCase):
             b'\x04\x02_a\x98\x01v\x01'))
 
 
+    def test_long_names_are_not_kept(self):
+        # the check of the names is cached; a long name would stay in
+        # memory after its document is gone
+        from wcf import xmltext
+        cached = xmltext._check_short_ncname.cache_info().currsize
+        for size in (65, 4 << 20):
+            name = 'n' * size
+            self.assertEqual('<%s></%s>' % (name, name), render(
+                b'\x40' + Utf8String(name).to_bytes() + b'\x01'))
+        self.assertEqual(cached, xmltext._check_short_ncname.cache_info().currsize)
+        with self.assertRaises(ValueError):
+            xmltext.ncname('n' * 100 + ' ')
+
 class RenderEscapingTests(unittest.TestCase):
 
     def test_hand_made_records_are_refused_or_escaped(self):

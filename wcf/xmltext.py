@@ -42,7 +42,19 @@ _ATTRIBUTE_ESCAPES = str.maketrans({'&': '&amp;', '<': '&lt;', '>': '&gt;',
                                     '\n': '&#10;', '\r': '&#13;'})
 
 
-@functools.lru_cache(maxsize=1024)
+def _check_ncname(name):
+    if not _NCNAME.fullmatch(name):
+        raise WcfBinaryError('MC-NBFX name %r cannot be represented in XML'
+                             % (name,))
+    return name
+
+
+# the names of a document repeat: the short ones are checked once (a
+# cache of long names would keep them alive after their documents)
+_MAX_CACHED_NAME = 64
+_check_short_ncname = functools.lru_cache(maxsize=1024)(_check_ncname)
+
+
 def ncname(name):
     """A name or prefix, WcfBinaryError if it is not an XML NCName.
 
@@ -53,10 +65,9 @@ def ncname(name):
     ...
     wcf.errors.WcfBinaryError: MC-NBFX name 'a b="c"' cannot be represented in XML
     """
-    if not _NCNAME.fullmatch(name):
-        raise WcfBinaryError('MC-NBFX name %r cannot be represented in XML'
-                         % (name,))
-    return name
+    if len(name) > _MAX_CACHED_NAME:
+        return _check_ncname(name)
+    return _check_short_ncname(name)
 
 
 def _escape(value, table):
