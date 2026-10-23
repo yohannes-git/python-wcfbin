@@ -46,7 +46,7 @@ class Suite(unittest.TestSuite):
     def __init__(self, *args, **kwargs):
         super(Suite, self).__init__(*args, **kwargs)
 
-        from wcf import datatypes, xml2records, xmltext
+        from wcf import datatypes, dictionary, session, xml2records, xmltext
         from tests import (test_conformance, test_session, test_robustness,
                            test_microsoft_independent, test_microsoft_boundaries,
                            test_library_hygiene, test_render,
@@ -54,6 +54,7 @@ class Suite(unittest.TestSuite):
         self.addTest(doctest.DocTestSuite(datatypes))
         self.addTest(doctest.DocTestSuite(xml2records))
         self.addTest(doctest.DocTestSuite(xmltext))
+        self.addTest(doctest.DocTestSuite(session))
         self.addTest(doctest.DocTestSuite(base))
         self.addTest(doctest.DocTestSuite(elements))
         self.addTest(doctest.DocTestSuite(attributes))

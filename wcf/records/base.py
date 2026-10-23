@@ -28,6 +28,7 @@
 #  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
+import dataclasses
 import struct
 import logging
 from contextvars import ContextVar
@@ -37,8 +38,10 @@ from wcf.datatypes import *
 log = logging.getLogger(__name__)
 
 
-class Quotas(object):
-    """Limits on the decoding of one document.
+@dataclasses.dataclass(frozen=True)
+class Quotas:
+    """Limits on the decoding of one document (immutable: DEFAULT_QUOTAS is
+    shared by every caller).
 
     MC-NBFX and MC-NBFSE (section 4) ask consumers to guard against
     documents that cost far more than their size: a two-byte
@@ -52,21 +55,17 @@ class Quotas(object):
                  and array item counted.
     max_chars:   maximum number of characters the document represents:
                  names, prefixes, namespace URIs, comments and values,
-                 dictionary strings expanded and array items repeated;
-                 this bounds the size of render_xml()'s output.
+                 dictionary strings expanded, element names counted
+                 twice (start and end tags) and array items repeated.
+                 render_xml() adds the markup and the escaping (up to
+                 6 characters for one, "&quot;"), so its output is
+                 bounded by a small multiple of max_chars.
 
     None disables a limit.
     """
-
-    def __init__(self, max_depth=64, max_records=200000,
-                 max_chars=16 * 1024 * 1024):
-        self.max_depth = max_depth
-        self.max_records = max_records
-        self.max_chars = max_chars
-
-    def __repr__(self):
-        return 'Quotas(max_depth=%r, max_records=%r, max_chars=%r)' % (
-            self.max_depth, self.max_records, self.max_chars)
+    max_depth: int = 64
+    max_records: int = 200000
+    max_chars: int = 16 * 1024 * 1024
 
 
 DEFAULT_QUOTAS = Quotas()
@@ -501,7 +500,7 @@ def _charge_record(record):
     elif isinstance(record, CommentRecord):
         charge(1, len(record.comment))
     elif isinstance(record, Element) and not isinstance(record, EndElementRecord):
-        charge(1, _name_chars(record))
+        charge(1, 2 * _name_chars(record))  # start and end tags
 
 
 Record.add_records((EndElementRecord,

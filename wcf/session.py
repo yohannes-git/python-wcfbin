@@ -57,7 +57,7 @@ class SessionDocument:
 
 
 def encode_string_table(strings):
-    """Serialize a StringTable; Size counts *encoded* Strings, not characters.
+    r"""Serialize a StringTable; Size counts *encoded* Strings, not characters.
 
     >>> encode_string_table(['é', 'long'])
     b'\x08\x02\xc3\xa9\x04long'

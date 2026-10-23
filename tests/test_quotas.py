@@ -92,6 +92,12 @@ class QuotaTests(unittest.TestCase):
             parse(wire, Quotas(max_records=500))
         self.assertEqual(1999, len(render_xml(parse(wire))) - len('<a></a>'))
 
+    def test_quotas_are_immutable(self):
+        import dataclasses
+        from wcf.records import DEFAULT_QUOTAS
+        with self.assertRaises(dataclasses.FrozenInstanceError):
+            DEFAULT_QUOTAS.max_depth = None
+
     def test_quotas_are_per_document(self):
         wire = b'\x40\x01a\x01'
         quotas = Quotas(max_records=1)
