@@ -10,7 +10,7 @@ import struct
 import unittest
 
 from wcf.dictionary import dictionary_context
-from wcf.records import Record
+from wcf.records import Record, render_xml
 from wcf.records.attributes import (
     AttributeRecord, DictionaryAttributeRecord, DictionaryXmlnsAttributeRecord,
     PrefixAttributeARecord, PrefixDictionaryAttributeARecord, ShortAttributeRecord,
@@ -22,7 +22,8 @@ from wcf.records.elements import (
 )
 from wcf.records.text import (
     Bytes32TextRecord, Chars32TextRecord, DoubleTextRecord, FloatTextRecord,
-    StartListTextRecord, TrueTextRecord, UnicodeChars32TextRecord,
+    StartListTextRecord, TrueTextRecord, UnicodeChars8TextRecord,
+    UnicodeChars16TextRecord, UnicodeChars32TextRecord,
 )
 
 
@@ -82,17 +83,33 @@ class TextRepresentations(unittest.TestCase):
             Bytes32TextRecord(b'').to_bytes()
         self.assertEqual(b'\xa2\x01\x00\x00\x00a', Bytes32TextRecord(b'a').to_bytes())
 
-    def test_unicode_chars32_uses_multibyte_int31(self):
-        for value in ('abc', 'é' * 70, 'a' * 32769):
+    def test_unicode_chars32_uses_int32(self):
+        # MC-NBFX section 3 example; the .NET reader agrees (section
+        # 2.2.3.29 says MultiByteInt31, which contradicts both)
+        self.assertEqual('<doc u32="32"></doc>', render_xml(decode(bytes.fromhex(
+            '40 03 64 6F 63 04 03 75 33 32 BA 04 00 00 00 33 00 32 00 01'))))
+        self.assertEqual('<U32>32</U32>', render_xml(decode(bytes.fromhex(
+            '40 03 55 33 32 BB 04 00 00 00 33 00 32 00'))))
+        for value in ('', 'abc', 'é' * 70, 'a' * 32769):
             with self.subTest(length=len(value)):
                 rec = UnicodeChars32TextRecord(value)
                 raw = rec.to_bytes()
                 self.assertEqual(0xBA, raw[0])
+                self.assertEqual(struct.pack('<i', 2 * len(value)), raw[1:5])
                 self.assertEqual(value, str(UnicodeChars32TextRecord.parse(io.BytesIO(raw[1:]))))
-        self.assertEqual(bytes.fromhex('ba 06 61 00 62 00 63 00'),
-                         UnicodeChars32TextRecord('abc').to_bytes())
+        for raw in (b'\x03\x00\x00\x00abc', b'\xff\xff\xff\xff',
+                    b'\x06\x00\x00\x00a\x00'):
+            with self.subTest(raw=raw), self.assertRaises(ValueError):
+                UnicodeChars32TextRecord.parse(io.BytesIO(raw))
+
+    def test_unicode_chars_odd_length_and_overflow(self):
+        for record in (UnicodeChars8TextRecord, UnicodeChars16TextRecord):
+            with self.subTest(record=record.__name__), self.assertRaises(ValueError):
+                record.parse(io.BytesIO(b'\x03\x00a\x00'))
         with self.assertRaises(ValueError):
-            UnicodeChars32TextRecord.parse(io.BytesIO(b'\x03abc'))
+            UnicodeChars8TextRecord('a' * 128).to_bytes()
+        with self.assertRaises(ValueError):
+            UnicodeChars16TextRecord('a' * 32768).to_bytes()
 
 
 class NameAndAttributeValidation(unittest.TestCase):

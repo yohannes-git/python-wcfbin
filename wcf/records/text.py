@@ -299,7 +299,13 @@ class BoolTextRecord(Text):
 
 
 class UnicodeChars8TextRecord(Text):
+    """UTF-16LE text (MC-NBFX 2.2.3.27 to 2.2.3.29).
+
+    The three records only differ by the size of their byte length:
+    UINT8, UINT16 and a non-negative INT32.
+    """
     type = 0xB6
+    _length_format = '<B'
 
     def __init__(self, string):
         if isinstance(string, str):
@@ -311,14 +317,18 @@ class UnicodeChars8TextRecord(Text):
         """
         >>> UnicodeChars8TextRecord('abc').to_bytes()
         b'\\xb6\\x06a\\x00b\\x00c\\x00'
-        >>> UnicodeChars8TextRecord(u'abc').to_bytes()
-        b'\\xb6\\x06a\\x00b\\x00c\\x00'
+        >>> UnicodeChars16TextRecord('abc').to_bytes()
+        b'\\xb8\\x06\\x00a\\x00b\\x00c\\x00'
+        >>> UnicodeChars32TextRecord('abc').to_bytes()
+        b'\\xba\\x06\\x00\\x00\\x00a\\x00b\\x00c\\x00'
         """
         data = self.value.encode('utf-16le')
-        bt = struct.pack(b'<B', self.type)
-        bt += struct.pack(b'<B', len(data))
-        bt += data
-        return bytes(bt)
+        try:
+            length = struct.pack(self._length_format, len(data))
+        except struct.error:
+            raise ValueError('%s too long (%d bytes)'
+                             % (type(self).__name__, len(data))) from None
+        return struct.pack('<B', self.type) + length + data
 
     def __str__(self):
         r"""
@@ -331,73 +341,33 @@ class UnicodeChars8TextRecord(Text):
     def parse(cls, fp):
         """
         >>> from io import BytesIO
-        >>> fp = BytesIO(b'\\x06a\\x00b\\x00c\\x00')
-        >>> str(UnicodeChars8TextRecord.parse(fp))
+        >>> str(UnicodeChars8TextRecord.parse(BytesIO(b'\\x06a\\x00b\\x00c\\x00')))
         'abc'
+        >>> str(UnicodeChars16TextRecord.parse(BytesIO(b'\\x06\\x00a\\x00b\\x00c\\x00')))
+        'abc'
+        >>> str(UnicodeChars32TextRecord.parse(BytesIO(b'\\x04\\x00\\x00\\x003\\x002\\x00')))
+        '32'
         """
-        ln = read_struct(fp, '<B')
-        data = read_exact(fp, ln)
-        return cls(data.decode('utf-16le'))
+        length = read_struct(fp, cls._length_format)
+        if length < 0:
+            raise ValueError('%s length must not be negative' % cls.__name__)
+        if length % 2:
+            raise ValueError('UTF-16 byte length must be even')
+        return cls(read_exact(fp, length).decode('utf-16le'))
 
 
 class UnicodeChars16TextRecord(UnicodeChars8TextRecord):
     type = 0xB8
-
-    def to_bytes(self):
-        """
-        >>> UnicodeChars16TextRecord('abc').to_bytes()
-        b'\\xb8\\x06\\x00a\\x00b\\x00c\\x00'
-        >>> UnicodeChars16TextRecord(u'abc').to_bytes()
-        b'\\xb8\\x06\\x00a\\x00b\\x00c\\x00'
-        """
-        data = self.value.encode('utf-16le')
-        bt = struct.pack(b'<B', self.type)
-        bt += struct.pack(b'<H', len(data))
-        bt += data
-        return bytes(bt)
-
-    @classmethod
-    def parse(cls, fp):
-        """
-        >>> from io import BytesIO
-        >>> fp = BytesIO(b'\\x06\\x00a\\x00b\\x00c\\x00')
-        >>> str(UnicodeChars16TextRecord.parse(fp))
-        'abc'
-        """
-        ln = read_struct(fp, '<H')
-        data = read_exact(fp, ln)
-        return cls(data.decode('utf-16le'))
+    _length_format = '<H'
 
 
 class UnicodeChars32TextRecord(UnicodeChars8TextRecord):
+    """MC-NBFX 2.2.3.29 describes the Length as a MultiByteInt31, but the
+    example of section 3 ("BA 04 00 00 00 33 00 32 00" for "32") and the
+    .NET XmlBinaryReader (ReadUInt31(), a non-negative Int32) use a
+    4-byte INT32, as for Chars32Text and Bytes32Text."""
     type = 0xBA
-
-    def to_bytes(self):
-        """
-        >>> UnicodeChars32TextRecord('abc').to_bytes()
-        b'\\xba\\x06a\\x00b\\x00c\\x00'
-        >>> UnicodeChars32TextRecord(u'abc').to_bytes()
-        b'\\xba\\x06a\\x00b\\x00c\\x00'
-        """
-        data = self.value.encode('utf-16le')
-        bt = struct.pack(b'<B', self.type)
-        bt += MultiByteInt31(len(data)).to_bytes()
-        bt += data
-        return bytes(bt)
-
-    @classmethod
-    def parse(cls, fp):
-        """
-        >>> from io import BytesIO
-        >>> fp = BytesIO(b'\\x06a\\x00b\\x00c\\x00')
-        >>> str(UnicodeChars32TextRecord.parse(fp))
-        'abc'
-        """
-        ln = MultiByteInt31.parse(fp).value
-        if ln % 2:
-            raise ValueError('UTF-16 byte length must be even')
-        data = read_exact(fp, ln)
-        return cls(data.decode('utf-16le'))
+    _length_format = '<i'
 
 
 class QNameDictionaryTextRecord(Text):
