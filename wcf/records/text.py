@@ -36,7 +36,6 @@ import logging
 import math
 import uuid
 
-from xml.sax.saxutils import escape
 
 log = logging.getLogger(__name__)
 
@@ -602,13 +601,15 @@ class Chars8TextRecord(Text):
             self.value = str(value)
 
     def __str__(self):
-        r"""
+        r"""The characters, unescaped like every other text record (the
+        XML escaping is done by render_xml()).
+
         >>> str(Chars8TextRecord("abc"))
         'abc'
         >>> str(Chars8TextRecord('a<b>&'))
-        'a&lt;b&gt;&amp;'
+        'a<b>&'
         """
-        return escape(self.value)
+        return self.value
 
     def to_bytes(self):
         r"""

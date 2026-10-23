@@ -49,7 +49,7 @@ class Suite(unittest.TestSuite):
         from wcf import datatypes, xml2records
         from tests import (test_conformance, test_session, test_robustness,
                            test_microsoft_independent, test_microsoft_boundaries,
-                           test_library_hygiene)
+                           test_library_hygiene, test_render)
         self.addTest(doctest.DocTestSuite(datatypes))
         self.addTest(doctest.DocTestSuite(xml2records))
         self.addTest(doctest.DocTestSuite(base))
@@ -63,6 +63,7 @@ class Suite(unittest.TestSuite):
         self.addTests(unittest.defaultTestLoader.loadTestsFromModule(test_microsoft_independent))
         self.addTests(unittest.defaultTestLoader.loadTestsFromModule(test_microsoft_boundaries))
         self.addTests(unittest.defaultTestLoader.loadTestsFromModule(test_library_hygiene))
+        self.addTests(unittest.defaultTestLoader.loadTestsFromModule(test_render))
 
 if __name__ == '__main__':
     result = unittest.TextTestRunner(verbosity=1).run(Suite())
