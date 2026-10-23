@@ -126,6 +126,26 @@ class QuotaTests(unittest.TestCase):
         big = b'\x40\x01a\x9d' + struct.pack('<i', 300000) + b'x' * 300000
         self.assertEqual(300000, len(parse(big)[0].childs[0].value))
 
+    def test_short_reads(self):
+        # a raw stream may return fewer bytes than asked for
+        class Trickle(io.RawIOBase):
+            def __init__(self, data):
+                self.fp = io.BytesIO(data)
+
+            def readable(self):
+                return True
+
+            def readinto(self, buffer):
+                data = self.fp.read(min(len(buffer), 3))
+                buffer[:len(data)] = data
+                return len(data)
+        big = 'x' * 70000
+        wire = (b'\x40\x01a\x98\x0a0123456789' + b'\x9c' +
+                struct.pack('<i', len(big)) + big.encode() + b'\x01')
+        self.assertEqual('<a>0123456789%s</a>' % big, render_xml(Record.parse(Trickle(wire))))
+        with self.assertRaisesRegex(ValueError, 'Truncated'):
+            Record.parse(Trickle(wire[:20]))
+
     def test_quotas_are_immutable(self):
         import dataclasses
         from wcf.records import DEFAULT_QUOTAS

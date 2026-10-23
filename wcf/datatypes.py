@@ -57,11 +57,11 @@ def read_exact(fp, length):
     ...
     wcf.errors.WcfBinaryError: Truncated WCF binary data (expected 2 bytes, got 1)
     """
-    if length <= _READ_CHUNK:
-        data = fp.read(length)
-    else:
-        # the read(n) of a file object allocates n bytes before reading
-        parts, remaining = [], length
+    # the read(n) of a file object allocates n bytes before reading: no
+    # more than a chunk at a time; a raw stream can also return less
+    data = fp.read(min(length, _READ_CHUNK))
+    if 0 < len(data) < length:
+        parts, remaining = [data], length - len(data)
         while remaining:
             part = fp.read(min(remaining, _READ_CHUNK))
             if not part:
@@ -71,7 +71,7 @@ def read_exact(fp, length):
         data = b''.join(parts)
     if len(data) != length:
         raise WcfBinaryError('Truncated WCF binary data (expected %d bytes, got %d)'
-                         % (length, len(data)))
+                             % (length, len(data)))
     return data
 
 
