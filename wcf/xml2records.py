@@ -83,14 +83,23 @@ def _smallest_record(classes, value, length):
     """The record of ``classes`` with the smallest length field that can
     hold ``length`` bytes."""
     for record in classes:
-        if length <= record.max_length():
+        if length <= _MAX_LENGTH[record]:
             return record(value)
     raise WcfBinaryError('%s too long (%d bytes)' % (classes[-1].__name__, length))
 
 
+_MAX_LENGTH = {record: record.max_length() for record in (
+    Chars8TextRecord, Chars16TextRecord, Chars32TextRecord,
+    Bytes8TextRecord, Bytes16TextRecord, Bytes32TextRecord)}
+
+
 def _choose_chars_record(data):
+    # at most 4 UTF-8 bytes per character: short strings are not encoded
+    if len(data) <= 0x3f:
+        return Chars8TextRecord(data)
     return _smallest_record((Chars8TextRecord, Chars16TextRecord,
-                             Chars32TextRecord), data, len(data.encode('utf-8')))
+                             Chars32TextRecord), data,
+                            len(data) if data.isascii() else len(data.encode('utf-8')))
 
 
 def _choose_bytes_record(value):
@@ -181,13 +190,16 @@ class XMLParser(object):
                                        self.type_overrides.get('/' + '/'.join(path)))
 
     def _value_record(self, value, path):
-        kind = self._resolve_override(path)
-        if kind is not None:
-            return _typed_text(value, kind)
+        if self.type_overrides:
+            kind = self._resolve_override(path)
+            if kind is not None:
+                return _typed_text(value, kind)
         # DictionaryText is still a lexical string, not inferred numeric typing.
         # In sessionful MC-NBFSE, use strings already shared via a StringTable.
-        if self.dictionary_text and value in inverted_dict:
-            return DictionaryTextRecord(inverted_dict[value])
+        if self.dictionary_text:
+            index = inverted_dict.get(value)
+            if index is not None:
+                return DictionaryTextRecord(index)
         return _choose_chars_record(value)
 
     def _flush_text(self):
@@ -209,19 +221,33 @@ class XMLParser(object):
                         else DictionaryXmlnsAttributeRecord(prefix, index))
             return (ShortXmlnsAttributeRecord(value) if prefix is None
                     else XmlnsAttributeRecord(prefix, value))
-        record = self._value_record(value, self._path + ['@' + _as_qname(name, ns, True)])
+        if self.type_overrides:
+            path = self._path + ['@' + _as_qname(name, ns, True)]
+        else:
+            path = None
+            if ':' in name and name.partition(':')[0] not in ns:
+                _as_qname(name, ns, True)  # WcfBinaryError: undeclared prefix
+        record = self._value_record(value, path)
         return _named_record(name, _ATTRIBUTE_RECORDS, record)
 
     def _on_start(self, tag, attrs):
         if self._stack:
             self._flush_text()
-        ns = self._namespace_stack[-1].copy()
+        ns = self._namespace_stack[-1]
+        copied = False
         for name, value in attrs.items():
-            if name == 'xmlns':
-                ns[''] = value
-            elif name.startswith('xmlns:'):
-                ns[name[6:]] = value
-        self._path.append(_as_qname(tag, ns))
+            if name.startswith('xmlns'):
+                if not copied:
+                    # the scope of the parent is shared until one is declared
+                    ns, copied = ns.copy(), True
+                if name == 'xmlns':
+                    ns[''] = value
+                elif name.startswith('xmlns:'):
+                    ns[name[6:]] = value
+        if self.type_overrides:
+            self._path.append(_as_qname(tag, ns))
+        elif ':' in tag and tag.partition(':')[0] not in ns:
+            _as_qname(tag, ns)  # WcfBinaryError: undeclared prefix
         element = self._parse_tag(tag)
         for name, value in attrs.items():
             element.attributes.append(self._parse_attr(name, value, ns))
@@ -235,7 +261,8 @@ class XMLParser(object):
     def _on_end(self, tag):
         self._flush_text()
         self._stack.pop()
-        self._path.pop()
+        if self.type_overrides:
+            self._path.pop()
         self._namespace_stack.pop()
 
     def _on_data(self, data):
