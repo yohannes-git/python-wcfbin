@@ -10,6 +10,7 @@ import base64
 import re
 from xml.parsers import expat
 
+from wcf.errors import WcfBinaryError, binary_errors
 from wcf.dictionary import inverted_dict
 from wcf.xmltext import ncname
 from wcf.records import (
@@ -70,7 +71,7 @@ def _as_qname(name, ns, is_attribute=False):
     if ':' in name:
         prefix, local = name.split(':', 1)
         if prefix not in ns:
-            raise ValueError('Undeclared XML namespace prefix: %s' % prefix)
+            raise WcfBinaryError('Undeclared XML namespace prefix: %s' % prefix)
         uri = ns[prefix]
     else:
         local = name
@@ -84,7 +85,7 @@ def _smallest_record(classes, value, length):
     for record in classes:
         if length <= record.max_length():
             return record(value)
-    raise ValueError('%s too long (%d bytes)' % (classes[-1].__name__, length))
+    raise WcfBinaryError('%s too long (%d bytes)' % (classes[-1].__name__, length))
 
 
 def _choose_chars_record(data):
@@ -106,17 +107,17 @@ def _typed_text(value, kind):
     if kind in _INT_TYPES:
         record, minval, maxval = _INT_TYPES[kind]
         if not re.fullmatch(r'[+-]?[0-9]+', stripped):
-            raise ValueError('Invalid %s value %r' % (kind, value))
+            raise WcfBinaryError('Invalid %s value %r' % (kind, value))
         n = int(stripped)
         if not minval <= n <= maxval:
-            raise ValueError('%s out of range: %r' % (kind, value))
+            raise WcfBinaryError('%s out of range: %r' % (kind, value))
         return record(n)
     if kind in ('bool', 'boolean'):
         if stripped in ('true', '1'):
             return BoolTextRecord(True)
         if stripped in ('false', '0'):
             return BoolTextRecord(False)
-        raise ValueError('Invalid boolean literal %r' % value)
+        raise WcfBinaryError('Invalid boolean literal %r' % value)
     if kind in ('float', 'double'):
         if stripped in ('INF', '+INF'):
             n = float('inf')
@@ -127,7 +128,7 @@ def _typed_text(value, kind):
         elif re.fullmatch(r'[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][+-]?\d+)?', stripped):
             n = float(stripped)
         else:
-            raise ValueError('Invalid floating-point literal %r' % value)
+            raise WcfBinaryError('Invalid floating-point literal %r' % value)
         return FloatTextRecord(n) if kind == 'float' else DoubleTextRecord(n)
     if kind == 'decimal':
         return DecimalTextRecord(Decimal.from_string(stripped))
@@ -139,7 +140,7 @@ def _typed_text(value, kind):
         # Whitespace is permitted in XML Schema base64 lexical values.
         clean = ''.join(stripped.split())
         return _choose_bytes_record(base64.b64decode(clean, validate=True))
-    raise ValueError('Unsupported explicit WCF type %r' % kind)
+    raise WcfBinaryError('Unsupported explicit WCF type %r' % kind)
 
 
 class XMLParser(object):
@@ -248,20 +249,21 @@ class XMLParser(object):
             self.records.append(CommentRecord(comment))
 
     def _on_doctype(self, *args):
-        raise ValueError('DOCTYPE is not supported in WCF Binary XML conversion')
+        raise WcfBinaryError('DOCTYPE is not supported in WCF Binary XML conversion')
 
     def _on_pi(self, target, data):
-        raise ValueError('Processing instructions cannot be represented in MC-NBFX')
+        raise WcfBinaryError('Processing instructions cannot be represented in MC-NBFX')
 
     def _parse(self, data, final):
         try:
-            self._parser.Parse(data, final)
+            with binary_errors():  # e.g. binascii.Error of a base64 override
+                self._parser.Parse(data, final)
         except expat.ExpatError as error:
-            raise ValueError('Malformed XML: %s' % error) from None
+            raise WcfBinaryError('Malformed XML: %s' % error) from None
 
     def feed(self, data):
         if self._finalized:
-            raise ValueError('Parser already closed')
+            raise WcfBinaryError('Parser already closed')
         self._parse(data, False)
 
     def close(self):

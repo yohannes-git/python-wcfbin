@@ -523,6 +523,8 @@ inverted_dict = {v: k for k, v in dictionary.items()}
 # immutable static entries separate from session data.  A scoped mapping
 # avoids leaking strings between connections/threads/coroutines.
 from collections.abc import Mapping
+
+from wcf.errors import WcfBinaryError
 from contextlib import contextmanager
 from contextvars import ContextVar
 
@@ -531,13 +533,16 @@ static_inverted_dict = inverted_dict
 _session_dictionary = ContextVar('wcf_nbfse_dictionary', default=None)
 
 
-class UnknownDictionaryId(KeyError, ValueError):
+class UnknownDictionaryId(WcfBinaryError, KeyError):
     """A DictionaryString id that is neither in the static MC-NBFS
     dictionary nor in the active MC-NBFSE session dictionary.
 
-    It is a ValueError like every other malformed input, and a KeyError
-    for the callers that look ids up directly.
+    It is a WcfBinaryError like every other malformed input, and a
+    KeyError for the callers that look ids up directly.
     """
+
+    def __str__(self):
+        return 'Unknown MC-NBFS/NBFSE dictionary id %r' % (self.args[0],)
 
 
 class _SessionMaps(object):

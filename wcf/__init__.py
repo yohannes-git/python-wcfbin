@@ -27,4 +27,7 @@
 #  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 #  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-__all__ = ['records', 'datatypes', 'xml2records']
+__all__ = ['records', 'datatypes', 'dictionary', 'errors', 'session',
+           'xml2records', 'xmltext']
+
+from wcf.errors import WcfBinaryError  # noqa: E402,F401

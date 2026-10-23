@@ -21,6 +21,20 @@ class XmlInputTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     BinaryXmlSession().encode_xml(xml)
 
+    def test_standard_library_errors_are_converted(self):
+        # binascii.Error of a base64 override, UnicodeDecodeError of a
+        # StringTable, unknown dictionary ids
+        from wcf.errors import WcfBinaryError
+        from wcf.dictionary import UnknownDictionaryId
+        with self.assertRaises(WcfBinaryError):
+            XMLParser.parse('<b>@@@</b>', type_overrides={'/b': 'base64'})
+        with self.assertRaises(WcfBinaryError):
+            BinaryXmlSession().parse_document(b'\x02\x01\xff\x42\x01\x01')
+        with self.assertRaises(WcfBinaryError):
+            Record.parse(io.BytesIO(b'\x40\x01a\x99\x01\xff'))
+        with self.assertRaisesRegex(UnknownDictionaryId, 'dictionary id 1'):
+            Record.parse(io.BytesIO(b'\x42\x01\x01'))
+
     def test_names_must_be_ncnames(self):
         # a non namespace-aware parser takes "b:c" as the local name
         for xml in ('<a:b:c xmlns:a="urn:a"/>',

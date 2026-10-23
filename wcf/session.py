@@ -13,6 +13,7 @@ from collections import ChainMap
 from contextlib import contextmanager
 from io import BytesIO
 
+from wcf.errors import WcfBinaryError, binary_errors
 from wcf.datatypes import MultiByteInt31, Utf8String, read_exact
 from wcf.dictionary import dictionary_context
 from wcf.records import DEFAULT_QUOTAS, Record, dump_records, render_xml
@@ -118,16 +119,16 @@ class BinaryXmlSession:
         """The (id -> string, string -> id) mappings of new strings, checked
         against MC-NBFSE 2.1 and the session limits; nothing is committed."""
         if len(self._entries) + len(strings) > self._max_strings:
-            raise ValueError('MC-NBFSE session dictionary limit exceeded')
+            raise WcfBinaryError('MC-NBFSE session dictionary limit exceeded')
         if self._session_bytes + table_bytes > self._max_session_bytes:
-            raise ValueError('MC-NBFSE session dictionary size limit exceeded')
+            raise WcfBinaryError('MC-NBFSE session dictionary size limit exceeded')
         entries, reverse = {}, {}
         next_id = 2 * len(self._entries) + 1
         for string in strings:
             # "Each String MUST be unique and MUST NOT have been present in
             # a prior StringTable."
             if string in self._value_to_id or string in reverse:
-                raise ValueError('Duplicate MC-NBFSE session string: %.64r' % string)
+                raise WcfBinaryError('Duplicate MC-NBFSE session string: %.64r' % string)
             entries[next_id] = string
             reverse[string] = next_id
             next_id += 2
@@ -147,18 +148,22 @@ class BinaryXmlSession:
         them, and the IDs of the following documents count them (MC-NBFSE
         2.1, "A consumer of this format MUST maintain this mapping").
         """
+        with binary_errors():
+            return self._parse_document(data, quotas)
+
+    def _parse_document(self, data, quotas):
         if len(data) > self._max_document_bytes:
-            raise ValueError('MC-NBFSE document size limit exceeded')
+            raise WcfBinaryError('MC-NBFSE document size limit exceeded')
         fp = BytesIO(data)
         size = MultiByteInt31.parse(fp).value
         if size > self._max_table_bytes:
-            raise ValueError('MC-NBFSE StringTable size limit exceeded')
+            raise WcfBinaryError('MC-NBFSE StringTable size limit exceeded')
         table_fp = BytesIO(read_exact(fp, size))
         new_strings = []
         while table_fp.tell() < size:
             new_strings.append(Utf8String.parse(table_fp).value)
             if len(self._entries) + len(new_strings) > self._max_strings:
-                raise ValueError('MC-NBFSE session dictionary limit exceeded')
+                raise WcfBinaryError('MC-NBFSE session dictionary limit exceeded')
         self._commit(*self._new_entries(new_strings, size), size)
         # Record.parse() resolves every dictionary reference
         with self.context():
@@ -188,7 +193,7 @@ class BinaryXmlSession:
             raise TypeError('MC-NBFSE strings must be Unicode')
         table = b''.join(Utf8String(string).to_bytes() for string in new_strings)
         if len(table) > self._max_table_bytes:
-            raise ValueError('MC-NBFSE StringTable size limit exceeded')
+            raise WcfBinaryError('MC-NBFSE StringTable size limit exceeded')
         entries, reverse = self._new_entries(new_strings, len(table))
         # serializing resolves every dictionary reference: an ID unknown
         # to the peer cannot be written
@@ -197,6 +202,6 @@ class BinaryXmlSession:
             data = (MultiByteInt31(len(table)).to_bytes() + table +
                     dump_records(make_records()))
         if len(data) > self._max_document_bytes:
-            raise ValueError('MC-NBFSE document size limit exceeded')
+            raise WcfBinaryError('MC-NBFSE document size limit exceeded')
         self._commit(entries, reverse, len(table))
         return data

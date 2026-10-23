@@ -31,6 +31,7 @@
 import itertools
 import sys
 
+from wcf.errors import WcfBinaryError
 from wcf.records import attributes, base, elements, text
 from wcf.records.base import *
 from wcf.records.text import *
@@ -73,9 +74,9 @@ def render_xml(records):
         elif isinstance(r, Text) and r.standalone:
             parts.append(escape_text(str(r)))
         elif isinstance(r, Text):
-            raise ValueError('WCF EndListText without StartListText')
+            raise WcfBinaryError('WCF EndListText without StartListText')
         else:
-            raise ValueError('Cannot render record %s as XML' % type(r).__name__)
+            raise WcfBinaryError('Cannot render record %s as XML' % type(r).__name__)
     return ''.join(parts)
 
 

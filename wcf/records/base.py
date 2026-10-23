@@ -32,6 +32,7 @@ import dataclasses
 import string
 from contextvars import ContextVar
 
+from wcf.errors import WcfBinaryError, binary_errors
 from wcf.datatypes import MultiByteInt31, Utf8String
 from wcf.dictionary import dictionary
 from wcf.xmltext import comment, escape_attribute, ncname
@@ -52,7 +53,7 @@ class Quotas:
     DictionaryText can stand for a long dictionary string, every record
     becomes an object, and nesting has no bound. These quotas play the
     role of .NET's XmlDictionaryReaderQuotas; a document exceeding one
-    is refused with ValueError while it is being parsed.
+    is refused with WcfBinaryError while it is being parsed.
 
     max_depth:   maximum element nesting (MaxDepth).
     max_records: maximum number of records, every attribute, list item
@@ -91,10 +92,10 @@ class _Budget(object):
         self.chars += chars
         quotas = self.quotas
         if quotas.max_records is not None and self.records > quotas.max_records:
-            raise ValueError('MC-NBFX document exceeds the quota of %d records'
+            raise WcfBinaryError('MC-NBFX document exceeds the quota of %d records'
                              % quotas.max_records)
         if quotas.max_chars is not None and self.chars > quotas.max_chars:
-            raise ValueError('MC-NBFX document exceeds the quota of %d characters'
+            raise WcfBinaryError('MC-NBFX document exceeds the quota of %d characters'
                              % quotas.max_chars)
 
 
@@ -145,7 +146,7 @@ class Record(object):
     def parse(cls, fp, quotas=DEFAULT_QUOTAS):
         r"""Parse a WCF Binary XML document, preserving element closure records.
 
-        The document is refused with ValueError when it exceeds one of
+        The document is refused with WcfBinaryError when it exceeds one of
         the ``quotas`` (DEFAULT_QUOTAS unless given, NO_QUOTAS for
         trusted input only). On a record class, parse() reads the record
         after its type: here, a record without fields.
@@ -161,7 +162,8 @@ class Record(object):
 
         token = _budget.set(_Budget(quotas))
         try:
-            return cls._parse_document(fp, quotas.max_depth)
+            with binary_errors():
+                return cls._parse_document(fp, quotas.max_depth)
         finally:
             _budget.reset(token)
 
@@ -182,13 +184,13 @@ class Record(object):
                 _charge_record(obj)
                 if isinstance(obj, EndElementRecord):
                     if not parents:
-                        raise ValueError('Unexpected EndElement')
+                        raise WcfBinaryError('Unexpected EndElement')
                     records, closed = parents.pop()
                     closed._wcf_closure = 'explicit'
                     open_element = parents[-1][1] if parents else None
                 elif isinstance(obj, Element):
                     if max_depth is not None and len(parents) >= max_depth:
-                        raise ValueError('MC-NBFX document nested deeper than %d'
+                        raise WcfBinaryError('MC-NBFX document nested deeper than %d'
                                          % max_depth)
                     records.append(obj)
                     parents.append((records, obj))
@@ -196,10 +198,10 @@ class Record(object):
                     open_element = obj
                 elif isinstance(obj, Attribute):
                     if not open_element or records is not open_element.childs or records:
-                        raise ValueError('Attribute outside element start')
+                        raise WcfBinaryError('Attribute outside element start')
                     open_element.attributes.append(obj)
                 elif isinstance(obj, Text) and not obj.standalone:
-                    raise ValueError('EndListText without StartListText')
+                    raise WcfBinaryError('EndListText without StartListText')
                 else:
                     records.append(obj)
                 continue
@@ -208,9 +210,9 @@ class Record(object):
             if (not record_type & 1 or record_class is None or
                     not issubclass(record_class, Text) or
                     not record_class.with_end_element):
-                raise ValueError('Unknown or reserved WCF record 0x%02X' % record_type)
+                raise WcfBinaryError('Unknown or reserved WCF record 0x%02X' % record_type)
             if not parents:
-                raise ValueError('TextWithEndElement outside an element')
+                raise WcfBinaryError('TextWithEndElement outside an element')
             obj = record_class.parse(fp)
             _charge_record(obj)
             records.append(obj)
@@ -218,7 +220,7 @@ class Record(object):
             closed._wcf_closure = 'implicit'
             open_element = parents[-1][1] if parents else None
         if parents:
-            raise ValueError('Unterminated element in WCF Binary XML')
+            raise WcfBinaryError('Unterminated element in WCF Binary XML')
         return root
 
 
@@ -292,7 +294,7 @@ def validate_xml_name(name, description='name'):
     object that was modified after construction.
     """
     if not isinstance(name, str) or not name or name == 'xmlns':
-        raise ValueError('Invalid MC-NBFX %s: %r' % (description, name))
+        raise WcfBinaryError('Invalid MC-NBFX %s: %r' % (description, name))
     return name
 
 
@@ -308,7 +310,7 @@ def validate_attribute_text(value):
     """
     if (not isinstance(value, Text) or not value.standalone or
             value.type not in Record.records):
-        raise ValueError('MC-NBFX attribute value must be a text record')
+        raise WcfBinaryError('MC-NBFX attribute value must be a text record')
     return value
 
 
@@ -316,11 +318,11 @@ def read_attribute_text(fp):
     """Read and validate the value slot of any MC-NBFX attribute record."""
     octet = fp.read(1)
     if len(octet) != 1:
-        raise ValueError('Truncated MC-NBFX attribute value')
+        raise WcfBinaryError('Truncated MC-NBFX attribute value')
     record_class = Record.records.get(octet[0])
     if (record_class is None or not issubclass(record_class, Text) or
             not record_class.standalone):
-        raise ValueError('Invalid MC-NBFX attribute text record 0x%02X' % octet[0])
+        raise WcfBinaryError('Invalid MC-NBFX attribute text record 0x%02X' % octet[0])
     return record_class.parse(fp)
 
 
@@ -434,11 +436,11 @@ class ArrayRecord(Record):
     def _check(self):
         """The *WithEndElement record type of the items."""
         if not self.data:
-            raise ValueError('ArrayRecord cannot be empty')
+            raise WcfBinaryError('ArrayRecord cannot be empty')
         record_type = self.data[0].type + 1
         if (record_type not in self.datatypes or
                 any(item.type + 1 != record_type for item in self.data)):
-            raise ValueError('ArrayRecord requires one supported element type')
+            raise WcfBinaryError('ArrayRecord requires one supported element type')
         return record_type
 
     def to_bytes(self):
@@ -473,23 +475,23 @@ class ArrayRecord(Record):
         """
         octet = fp.read(1)
         if len(octet) != 1:
-            raise ValueError('Truncated ArrayRecord element')
+            raise WcfBinaryError('Truncated ArrayRecord element')
         element_class = Record.records.get(octet[0])
         if element_class is None or not issubclass(element_class, Element):
-            raise ValueError('Invalid ArrayRecord element type 0x%02X' % octet[0])
+            raise WcfBinaryError('Invalid ArrayRecord element type 0x%02X' % octet[0])
         element = element_class.parse(fp)
         attributes = []
         while True:
             octet = fp.read(1)
             if len(octet) != 1:
-                raise ValueError('Truncated ArrayRecord attributes')
+                raise WcfBinaryError('Truncated ArrayRecord attributes')
             if octet[0] == EndElementRecord.type:
                 break
             # the type is checked before the record is read: another Array
             # here would recurse without bound
             record_class = Record.records.get(octet[0])
             if record_class is None or not issubclass(record_class, Attribute):
-                raise ValueError('Invalid ArrayRecord attribute record 0x%02X'
+                raise WcfBinaryError('Invalid ArrayRecord attribute record 0x%02X'
                                  % octet[0])
             attribute = record_class.parse(fp)
             # charged as they are read, not once all are allocated
@@ -497,13 +499,13 @@ class ArrayRecord(Record):
             attributes.append(attribute)
         octet = fp.read(1)
         if len(octet) != 1:
-            raise ValueError('Truncated ArrayRecord data type')
+            raise WcfBinaryError('Truncated ArrayRecord data type')
         if octet[0] not in cls.datatypes:
-            raise ValueError('Unsupported ArrayRecord type 0x%02X' % octet[0])
+            raise WcfBinaryError('Unsupported ArrayRecord type 0x%02X' % octet[0])
         item_class = Record.records[octet[0] - 1]
         count = MultiByteInt31.parse(fp).value
         if count == 0:
-            raise ValueError('ArrayRecord length cannot be zero')
+            raise WcfBinaryError('ArrayRecord length cannot be zero')
         # every item stands for <name attributes>value</name>
         item_records, item_chars = 1, 2 * _name_chars(element) + item_class.max_chars
         for attribute in attributes:
@@ -527,7 +529,7 @@ class ArrayRecord(Record):
 # --- XML of the element and attribute records -----------------------------
 
 def qualified_name(record):
-    """The qualified name of an element or attribute record, ValueError if
+    """The qualified name of an element or attribute record, WcfBinaryError if
     XML cannot carry it."""
     name = ncname(record.name)
     return name if record.prefix is None else '%s:%s' % (ncname(record.prefix), name)

@@ -34,12 +34,14 @@ reading of fixed-size fields."""
 import re
 import struct
 
+from wcf.errors import WcfBinaryError
+
 __all__ = ['MultiByteInt31', 'Utf8String', 'Decimal', 'read_exact',
            'read_struct']
 
 
 def read_exact(fp, length):
-    """Read exactly ``length`` bytes, ValueError on truncated input.
+    """Read exactly ``length`` bytes, WcfBinaryError on truncated input.
 
     >>> from io import BytesIO
     >>> read_exact(BytesIO(b'abc'), 2)
@@ -47,11 +49,11 @@ def read_exact(fp, length):
     >>> read_exact(BytesIO(b'a'), 2)
     Traceback (most recent call last):
     ...
-    ValueError: Truncated WCF binary data (expected 2 bytes, got 1)
+    wcf.errors.WcfBinaryError: Truncated WCF binary data (expected 2 bytes, got 1)
     """
     data = fp.read(length)
     if len(data) != length:
-        raise ValueError('Truncated WCF binary data (expected %d bytes, got %d)'
+        raise WcfBinaryError('Truncated WCF binary data (expected %d bytes, got %d)'
                          % (length, len(data)))
     return data
 
@@ -88,7 +90,7 @@ class MultiByteInt31(object):
         """
         value = self.value
         if not isinstance(value, int) or not 0 <= value <= 0x7fffffff:
-            raise ValueError('MultiByteInt31 must be an unsigned 31-bit integer')
+            raise WcfBinaryError('MultiByteInt31 must be an unsigned 31-bit integer')
         out = bytearray()
         while value > 0x7F:
             out.append(value & 0x7F | 0x80)
@@ -120,19 +122,19 @@ class MultiByteInt31(object):
         for pos in range(5):
             octet = fp.read(1)
             if len(octet) != 1:
-                raise ValueError('Truncated MultiByteInt31')
+                raise WcfBinaryError('Truncated MultiByteInt31')
             byte = octet[0]
             if pos == 4:
                 if byte & 0xF8:
-                    raise ValueError('Invalid fifth byte in MultiByteInt31')
+                    raise WcfBinaryError('Invalid fifth byte in MultiByteInt31')
                 value |= byte << 28
                 if value < (1 << 28):
-                    raise ValueError('Non-canonical MultiByteInt31 length')
+                    raise WcfBinaryError('Non-canonical MultiByteInt31 length')
                 return cls(value)
             value |= (byte & 0x7F) << (pos * 7)
             if not byte & 0x80:
                 if pos and value < (1 << (7 * pos)):
-                    raise ValueError('Non-canonical MultiByteInt31 length')
+                    raise WcfBinaryError('Non-canonical MultiByteInt31 length')
                 return cls(value)
 
 
@@ -185,9 +187,9 @@ class Decimal(object):
 
     def __init__(self, sign, high, low, scale):
         if not 0 <= scale <= 28:
-            raise ValueError('scale %d isn\'t between 0 and 28' % scale)
+            raise WcfBinaryError('scale %d isn\'t between 0 and 28' % scale)
         if not (0 <= high < 1 << 32 and 0 <= low < 1 << 64):
-            raise ValueError('Decimal coefficient out of the 96-bit range')
+            raise WcfBinaryError('Decimal coefficient out of the 96-bit range')
         self.sign = sign
         self.high = high
         self.low = low
@@ -195,7 +197,7 @@ class Decimal(object):
 
     @classmethod
     def from_string(cls, text):
-        """Parse an xsd:decimal (ValueError when it is not one or does not
+        """Parse an xsd:decimal (WcfBinaryError when it is not one or does not
         fit in a DECIMAL).
 
         >>> str(Decimal.from_string('-12.50'))
@@ -203,21 +205,21 @@ class Decimal(object):
         >>> Decimal.from_string('1E+999999999')
         Traceback (most recent call last):
         ...
-        ValueError: Invalid decimal '1E+999999999'
+        wcf.errors.WcfBinaryError: Invalid decimal '1E+999999999'
         """
         match = cls._LEXICAL.fullmatch(text.strip())
         if match is None or not (match.group(2) or match.group(3)):
-            raise ValueError('Invalid decimal %r' % (text,))
+            raise WcfBinaryError('Invalid decimal %r' % (text,))
         sign, integer, fraction = match.group(1), match.group(2), match.group(3) or ''
         if len(fraction) > 28:
             fraction = fraction.rstrip('0')
         digits = (integer + fraction).lstrip('0')
         # 2^96 has 29 digits: checked before any conversion
         if len(fraction) > 28 or len(digits) > 29:
-            raise ValueError('Decimal %r out of the DECIMAL range' % (text,))
+            raise WcfBinaryError('Decimal %r out of the DECIMAL range' % (text,))
         coefficient = int(digits or '0')
         if coefficient >= 1 << 96:
-            raise ValueError('Decimal %r out of the DECIMAL range' % (text,))
+            raise WcfBinaryError('Decimal %r out of the DECIMAL range' % (text,))
         return cls(sign == '-', coefficient >> 64, coefficient & ((1 << 64) - 1),
                    len(fraction))
 
@@ -268,7 +270,7 @@ class Decimal(object):
         # recipient" ([MS-OAUT] 2.2.26)
         _, scale, sign, high, low = struct.unpack('<HBBIQ', read_exact(fp, 16))
         if sign not in (0, 0x80):
-            raise ValueError('Invalid Decimal sign bits')
+            raise WcfBinaryError('Invalid Decimal sign bits')
         return cls(bool(sign), high, low, scale)
 
 

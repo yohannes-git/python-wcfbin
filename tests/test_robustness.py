@@ -6,6 +6,7 @@ import unittest
 from xml.sax.saxutils import escape
 from xml.etree import ElementTree as ET
 
+from wcf.errors import WcfBinaryError
 from wcf.records import Record, dump_records, render_xml
 from wcf.xml2records import XMLParser
 from wcf.session import BinaryXmlSession
@@ -53,8 +54,8 @@ class RobustnessTests(unittest.TestCase):
             blob = bytes(rng.getrandbits(8) for _ in range(rng.randrange(0, 40)))
             try:
                 records = Record.parse(io.BytesIO(blob))
-            except ValueError:
-                # every malformed input must be reported as ValueError
+            except WcfBinaryError:
+                # every malformed input must be reported as WcfBinaryError
                 continue
             self.assertEqual(blob, dump_records(records), msg='iteration %d' % i)
 
@@ -106,7 +107,7 @@ class RobustnessTests(unittest.TestCase):
         data = self.all_text_document()
         self.assertEqual(data, dump_records(Record.parse(io.BytesIO(data))))
         for cut in range(1, len(data)):
-            with self.subTest(cut=cut), self.assertRaises(ValueError):
+            with self.subTest(cut=cut), self.assertRaises(WcfBinaryError):
                 Record.parse(io.BytesIO(data[:cut]))
 
     def test_mutated_input_raises_only_value_error(self):
@@ -119,7 +120,7 @@ class RobustnessTests(unittest.TestCase):
             try:
                 records = Record.parse(io.BytesIO(bytes(blob)))
                 render_xml(records)
-            except ValueError:
+            except WcfBinaryError:
                 continue
 
     def test_float_and_decimal_as_lexical_strings(self):

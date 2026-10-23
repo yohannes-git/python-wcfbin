@@ -9,6 +9,8 @@ name or a comment) and represent the same characters once parsed again.
 import functools
 import re
 
+from wcf.errors import WcfBinaryError
+
 # XML 1.0 (fifth edition) NCName: a Name without ':'
 _NAME_START = ('A-Z_a-z\xc0-\xd6\xd8-\xf6\xf8-˿Ͱ-ͽ'
                'Ϳ-῿‌‍⁰-↏Ⰰ-⿯'
@@ -27,17 +29,17 @@ _ATTRIBUTE_ESCAPES = str.maketrans({'&': '&amp;', '<': '&lt;', '>': '&gt;',
 
 @functools.lru_cache(maxsize=1024)
 def ncname(name):
-    """A name or prefix, ValueError if it is not an XML NCName.
+    """A name or prefix, WcfBinaryError if it is not an XML NCName.
 
     >>> ncname('Envelope')
     'Envelope'
     >>> ncname('a b="c"')
     Traceback (most recent call last):
     ...
-    ValueError: MC-NBFX name 'a b="c"' cannot be represented in XML
+    wcf.errors.WcfBinaryError: MC-NBFX name 'a b="c"' cannot be represented in XML
     """
     if not _NCNAME.fullmatch(name):
-        raise ValueError('MC-NBFX name %r cannot be represented in XML'
+        raise WcfBinaryError('MC-NBFX name %r cannot be represented in XML'
                          % (name,))
     return name
 
@@ -76,7 +78,7 @@ def escape_attribute(value):
 
 
 def comment(text):
-    """A comment, ValueError if XML cannot carry it.
+    """A comment, WcfBinaryError if XML cannot carry it.
 
     A comment cannot contain "--" nor end with "-", and nothing is
     escaped in it: a character reference would be read as literal text
@@ -88,6 +90,6 @@ def comment(text):
     """
     if ('--' in text or text.endswith('-') or '\r' in text or
             _NOT_XML_CHAR.search(text)):
-        raise ValueError('MC-NBFX comment %r cannot be represented in XML'
+        raise WcfBinaryError('MC-NBFX comment %r cannot be represented in XML'
                          % (text,))
     return '<!--%s-->' % text

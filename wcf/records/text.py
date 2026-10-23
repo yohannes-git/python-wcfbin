@@ -37,6 +37,7 @@ import math
 import struct
 import uuid
 
+from wcf.errors import WcfBinaryError
 from wcf.datatypes import Decimal, MultiByteInt31, read_exact, read_struct
 from wcf.dictionary import dictionary
 from wcf.records.base import Record, Text, charge
@@ -90,7 +91,7 @@ def _shortest_ieee754_text(value, single_precision):
         except (OverflowError, ValueError):
             continue
     else:
-        raise ValueError('Cannot render MC-NBFX floating-point value')
+        raise WcfBinaryError('Cannot render MC-NBFX floating-point value')
 
     # Choose ordinary decimal only when the point falls within the range of
     # significant digits, or just before it ("0.5": "except when a decimal
@@ -132,12 +133,12 @@ class _FixedSizeText(Text):
         >>> Int8TextRecord(128).to_bytes()  # doctest: +ELLIPSIS
         Traceback (most recent call last):
         ...
-        ValueError: Int8TextRecord: ...
+        wcf.errors.WcfBinaryError: Int8TextRecord: ...
         """
         try:
             value = struct.pack(self._format, self.value)
         except (struct.error, OverflowError) as error:
-            raise ValueError('%s: %s' % (type(self).__name__, error)) from None
+            raise WcfBinaryError('%s: %s' % (type(self).__name__, error)) from None
         return struct.pack('<B', self.type) + value
 
     def __str__(self):
@@ -193,11 +194,11 @@ class _LengthPrefixedText(Text):
     def to_bytes(self):
         data = self._encode()
         if self._positive and not data:
-            raise ValueError('%s length must be positive' % type(self).__name__)
+            raise WcfBinaryError('%s length must be positive' % type(self).__name__)
         try:
             length = struct.pack(self._length_format, len(data))
         except struct.error:
-            raise ValueError('%s too long (%d bytes)'
+            raise WcfBinaryError('%s too long (%d bytes)'
                              % (type(self).__name__, len(data))) from None
         return struct.pack('<B', self.type) + length + data
 
@@ -205,7 +206,7 @@ class _LengthPrefixedText(Text):
     def parse(cls, fp):
         length = read_struct(fp, cls._length_format)
         if length < 0 or (cls._positive and length == 0):
-            raise ValueError('%s length must be %s' % (
+            raise WcfBinaryError('%s length must be %s' % (
                 cls.__name__, 'positive' if cls._positive else 'non-negative'))
         return cls(cls._decode(read_exact(fp, length)))
 
@@ -306,7 +307,7 @@ class BoolTextRecord(Text):
         """
         byte = read_struct(fp, '<B')
         if byte not in (0, 1):
-            raise ValueError('Invalid BoolText value %d' % byte)
+            raise WcfBinaryError('Invalid BoolText value %d' % byte)
         return cls(bool(byte))
 
 
@@ -355,7 +356,7 @@ class _Utf16Text(_Utf8Text):
     @classmethod
     def _decode(cls, data):
         if len(data) % 2:
-            raise ValueError('UTF-16 byte length must be even')
+            raise WcfBinaryError('UTF-16 byte length must be even')
         return data.decode('utf-16le')
 
 
@@ -390,7 +391,7 @@ class QNameDictionaryTextRecord(Text):
         b'\\xbc\\x01\\x02'
         """
         if len(self.prefix) != 1 or not 'a' <= self.prefix <= 'z':
-            raise ValueError('QNameDictionaryText prefix must be a-z')
+            raise WcfBinaryError('QNameDictionaryText prefix must be a-z')
         dictionary[self.index]  # never write an id unknown to the peer
         bt = struct.pack(b'<B', self.type)
         bt += struct.pack(b'<B', ord(self.prefix) - ord('a'))
@@ -414,7 +415,7 @@ class QNameDictionaryTextRecord(Text):
         """
         prefix_index = read_struct(fp, '<B')
         if prefix_index >= 26:
-            raise ValueError('Invalid QNameDictionaryText prefix index')
+            raise WcfBinaryError('Invalid QNameDictionaryText prefix index')
         prefix = chr(prefix_index + ord('a'))
         index = MultiByteInt31.parse(fp).value
         dictionary[index]  # an id unknown when decoding is refused
@@ -507,7 +508,7 @@ class DatetimeTextRecord(Text):
 
     def _check(self):
         if self.tz not in (0, 1, 2) or not 0 <= self.value < MAX_DATETIME_TICKS:
-            raise ValueError('Invalid MC-NBFX DateTimeText value %r or time zone %r'
+            raise WcfBinaryError('Invalid MC-NBFX DateTimeText value %r or time zone %r'
                              % (self.value, self.tz))
 
     def __str__(self):
@@ -699,7 +700,7 @@ class StartListTextRecord(Text):
         for value in self.values:
             if (not isinstance(value, Text) or not value.standalone or
                     isinstance(value, StartListTextRecord)):
-                raise ValueError('WCF text list must contain non-list text records')
+                raise WcfBinaryError('WCF text list must contain non-list text records')
             result.extend(value.to_bytes())
         result.append(EndListTextRecord.type)
         return bytes(result)
@@ -710,14 +711,14 @@ class StartListTextRecord(Text):
         while True:
             item = fp.read(1)
             if not item:
-                raise ValueError('Unterminated StartListText')
+                raise WcfBinaryError('Unterminated StartListText')
             code = item[0]
             if code == EndListTextRecord.type:
                 break
             item_cls = Record.records.get(code)
             if (item_cls is None or not issubclass(item_cls, Text) or
                     not item_cls.standalone or issubclass(item_cls, cls)):
-                raise ValueError('Invalid record 0x%02X inside a WCF text list' % code)
+                raise WcfBinaryError('Invalid record 0x%02X inside a WCF text list' % code)
             item = item_cls.parse(fp)
             charge(1, item.char_count() + 1)  # and its separator
             values.append(item)
