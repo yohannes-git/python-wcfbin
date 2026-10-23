@@ -262,7 +262,15 @@ class Decimal(object):
         '-123.4'
         >>> str(Decimal(False, 0, 5123456, 6))
         '5.123456'
+
+        A negative zero is written "0", as .NET does (the text of MC-NBFX
+        2.2.3.11 does not cover it):
+
+        >>> str(Decimal(True, 0, 0, 2))
+        '0'
         """
+        if not self.high and not self.low:
+            return '0'
         value = str(self.high * 2**64 + self.low)
         if self.scale > 0:
             value = value.zfill(self.scale + 1)
@@ -279,18 +287,12 @@ class Decimal(object):
         >>> str(Decimal.parse(buf))
         '5.123456'
         """
-        reserved = read_exact(fp, 2)
-        if reserved != b'\x00\x00':
-            raise ValueError('Invalid reserved Decimal bits')
-        scale = read_struct(fp, '<B')
-        sign_byte = read_struct(fp, '<B')
-        if sign_byte not in (0, 0x80):
+        # wReserved "MUST be set to 0 and MUST be ignored by the
+        # recipient" ([MS-OAUT] 2.2.26)
+        _, scale, sign, high, low = struct.unpack('<HBBIQ', read_exact(fp, 16))
+        if sign not in (0, 0x80):
             raise ValueError('Invalid Decimal sign bits')
-        sign = bool(sign_byte)
-        high = read_struct(fp, '<I')
-        low = read_struct(fp, '<Q')
-
-        return cls(sign, high, low, scale)
+        return cls(bool(sign), high, low, scale)
 
 
 if __name__ == '__main__':

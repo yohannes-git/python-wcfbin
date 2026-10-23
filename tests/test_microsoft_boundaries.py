@@ -83,6 +83,15 @@ class TextRepresentations(unittest.TestCase):
             Bytes32TextRecord(b'').to_bytes()
         self.assertEqual(b'\xa2\x01\x00\x00\x00a', Bytes32TextRecord(b'a').to_bytes())
 
+    def test_decimal_reserved_bits_are_ignored(self):
+        # [MS-OAUT] 2.2.26: wReserved "MUST be ignored by the recipient"
+        self.assertEqual('<a>1.5</a>', render_xml(decode(bytes.fromhex(
+            '40 01 61 94 01 00 02 00 00 00 00 00 96 00 00 00 00 00 00 00 01'))))
+        for wire in ('40 01 61 94 00 00 1d 00' + ' 00' * 12 + ' 01',  # scale 29
+                     '40 01 61 94 00 00 00 01' + ' 00' * 12 + ' 01'):  # sign 1
+            with self.subTest(wire=wire), self.assertRaises(ValueError):
+                decode(bytes.fromhex(wire))
+
     def test_float_below_one_has_a_leading_zero(self):
         # "a single zero "0" MUST precede the decimal point"
         for value, text in ((0.5, '0.5'), (-0.25, '-0.25'), (0.1, '0.1'),
