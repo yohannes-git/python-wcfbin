@@ -112,7 +112,7 @@ class _FixedSizeText(Text):
         """
         try:
             value = struct.pack(self._format, self.value)
-        except struct.error as error:
+        except (struct.error, OverflowError) as error:
             raise ValueError('%s: %s' % (type(self).__name__, error)) from None
         return struct.pack('<B', self.type) + value
 
@@ -154,6 +154,17 @@ class _LengthPrefixedText(Text):
     @classmethod
     def _decode(cls, data):
         return data.decode('utf-8')
+
+    @classmethod
+    def max_length(cls):
+        """The longest value (in bytes) the length field can hold.
+
+        >>> Chars8TextRecord.max_length(), Bytes32TextRecord.max_length()
+        (255, 2147483647)
+        """
+        bits = 8 * struct.calcsize(cls._length_format)
+        signed = cls._length_format[-1].islower()
+        return (1 << (bits - signed)) - 1
 
     def to_bytes(self):
         data = self._encode()

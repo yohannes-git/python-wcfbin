@@ -7,12 +7,12 @@ type overrides are keyed by an XML namespace-aware path.
 
 
 import base64
-import decimal
 import io
 import re
 from xml.parsers import expat
 
 from wcf.dictionary import inverted_dict
+from wcf.xmltext import ncname
 from wcf.records import (
     Record, ShortElementRecord, ElementRecord, ShortDictionaryElementRecord,
     DictionaryElementRecord, ShortAttributeRecord, AttributeRecord,
@@ -53,26 +53,23 @@ def _as_qname(name, ns, is_attribute=False):
     return '{%s}%s' % (uri, local) if uri else local
 
 
+def _smallest_record(classes, value, length):
+    """The record of ``classes`` with the smallest length field that can
+    hold ``length`` bytes."""
+    for record in classes:
+        if length <= record.max_length():
+            return record(value)
+    raise ValueError('%s too long (%d bytes)' % (classes[-1].__name__, length))
+
+
 def _choose_chars_record(data):
-    length = len(data.encode('utf-8'))
-    if length <= 0xff:
-        return Chars8TextRecord(data)
-    if length <= 0xffff:
-        return Chars16TextRecord(data)
-    if length <= 0xffffffff:
-        return Chars32TextRecord(data)
-    raise ValueError('XML text exceeds WCF Chars32Text length')
+    return _smallest_record((Chars8TextRecord, Chars16TextRecord,
+                             Chars32TextRecord), data, len(data.encode('utf-8')))
 
 
 def _choose_bytes_record(value):
-    length = len(value)
-    if length <= 0xff:
-        return Bytes8TextRecord(value)
-    if length <= 0xffff:
-        return Bytes16TextRecord(value)
-    if length <= 0xffffffff:
-        return Bytes32TextRecord(value)
-    raise ValueError('Binary data exceeds WCF Bytes32Text length')
+    return _smallest_record((Bytes8TextRecord, Bytes16TextRecord,
+                             Bytes32TextRecord), value, len(value))
 
 
 def _typed_text(value, kind):
@@ -108,16 +105,7 @@ def _typed_text(value, kind):
             raise ValueError('Invalid floating-point literal %r' % value)
         return FloatTextRecord(n) if kind == 'float' else DoubleTextRecord(n)
     if kind == 'decimal':
-        number = decimal.Decimal(stripped)
-        if not number.is_finite():
-            raise ValueError('Decimal must be finite')
-        sign, digits, exponent = number.as_tuple()
-        scale = max(0, -exponent)
-        coefficient = int(''.join(map(str, digits))) * 10**max(0, exponent)
-        if not (0 <= scale <= 28) or coefficient >= 1 << 96:
-            raise ValueError('Decimal out of 96-bit or scale range')
-        return DecimalTextRecord(Decimal(bool(sign), coefficient >> 64,
-                                         coefficient & ((1 << 64) - 1), scale))
+        return DecimalTextRecord(Decimal.from_string(stripped))
     if kind == 'uuid':
         return UuidTextRecord(stripped)
     if kind == 'uniqueid':
@@ -186,6 +174,8 @@ class XMLParser(object):
     def _parse_tag(self, tag):
         if ':' in tag:
             prefix, name = tag.split(':', 1)
+            ncname(prefix)
+            ncname(name)
             if len(prefix) == 1 and 'a' <= prefix <= 'z':
                 if name in inverted_dict:
                     cls = getattr(elements, 'PrefixDictionaryElement%sRecord' % prefix.upper())
@@ -195,7 +185,7 @@ class XMLParser(object):
             if name in inverted_dict:
                 return DictionaryElementRecord(prefix, inverted_dict[name])
             return ElementRecord(prefix, name)
-        if tag in inverted_dict:
+        if ncname(tag) in inverted_dict:
             return ShortDictionaryElementRecord(inverted_dict[tag])
         return ShortElementRecord(tag)
 
@@ -205,7 +195,7 @@ class XMLParser(object):
                 return ShortDictionaryXmlnsAttributeRecord(inverted_dict[value])
             return ShortXmlnsAttributeRecord(value)
         if name.startswith('xmlns:'):
-            prefix = name[6:]
+            prefix = ncname(name[6:])
             if value in inverted_dict:
                 return DictionaryXmlnsAttributeRecord(prefix, inverted_dict[value])
             return XmlnsAttributeRecord(prefix, value)
@@ -213,6 +203,8 @@ class XMLParser(object):
         record = self._value_record(value, self._path + ['@' + _as_qname(name, ns, True)])
         if ':' in name:
             prefix, local = name.split(':', 1)
+            ncname(prefix)
+            ncname(local)
             if len(prefix) == 1 and 'a' <= prefix <= 'z':
                 if local in inverted_dict:
                     cls = getattr(attributes, 'PrefixDictionaryAttribute%sRecord' % prefix.upper())
@@ -222,7 +214,7 @@ class XMLParser(object):
             if local in inverted_dict:
                 return DictionaryAttributeRecord(prefix, inverted_dict[local], record)
             return AttributeRecord(prefix, local, record)
-        if name in inverted_dict:
+        if ncname(name) in inverted_dict:
             return ShortDictionaryAttributeRecord(inverted_dict[name], record)
         return ShortAttributeRecord(name, record)
 
@@ -268,14 +260,20 @@ class XMLParser(object):
     def _on_pi(self, target, data):
         raise ValueError('Processing instructions cannot be represented in MC-NBFX')
 
+    def _parse(self, data, final):
+        try:
+            self._parser.Parse(data, final)
+        except expat.ExpatError as error:
+            raise ValueError('Malformed XML: %s' % error) from None
+
     def feed(self, data):
         if self._finalized:
             raise ValueError('Parser already closed')
-        self._parser.Parse(data, False)
+        self._parse(data, False)
 
     def close(self):
         if not self._finalized:
-            self._parser.Parse(b'', True)
+            self._parse(b'', True)
             self._finalized = True
         return self.records
 

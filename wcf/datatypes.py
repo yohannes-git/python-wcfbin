@@ -28,6 +28,7 @@
 #  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
+import re
 import struct
 import logging
 import sys
@@ -199,27 +200,57 @@ class Utf8String(object):
 
 
 class Decimal(object):
-    def __init__(self, sign, high, low, scale):
+    """A [MS-OAUT] 2.2.26 DECIMAL: a 96-bit coefficient (high 32 bits,
+    low 64 bits), a sign and a scale (0 to 28 decimal places)."""
 
+    # the xsd:decimal lexical space: no exponent
+    _LEXICAL = re.compile(r'([+-]?)([0-9]*)(?:\.([0-9]*))?')
+
+    def __init__(self, sign, high, low, scale):
         if not 0 <= scale <= 28:
             raise ValueError('scale %d isn\'t between 0 and 28' % scale)
+        if not (0 <= high < 1 << 32 and 0 <= low < 1 << 64):
+            raise ValueError('Decimal coefficient out of the 96-bit range')
         self.sign = sign
         self.high = high
         self.low = low
         self.scale = scale
+
+    @classmethod
+    def from_string(cls, text):
+        """Parse an xsd:decimal (ValueError when it is not one or does not
+        fit in a DECIMAL).
+
+        >>> str(Decimal.from_string('-12.50'))
+        '-12.5'
+        >>> Decimal.from_string('1E+999999999')
+        Traceback (most recent call last):
+        ...
+        ValueError: Invalid decimal '1E+999999999'
+        """
+        match = cls._LEXICAL.fullmatch(text.strip())
+        if match is None or not (match.group(2) or match.group(3)):
+            raise ValueError('Invalid decimal %r' % (text,))
+        sign, integer, fraction = match.group(1), match.group(2), match.group(3) or ''
+        if len(fraction) > 28:
+            fraction = fraction.rstrip('0')
+        digits = (integer + fraction).lstrip('0')
+        # 2^96 has 29 digits: checked before any conversion
+        if len(fraction) > 28 or len(digits) > 29:
+            raise ValueError('Decimal %r out of the DECIMAL range' % (text,))
+        coefficient = int(digits or '0')
+        if coefficient >= 1 << 96:
+            raise ValueError('Decimal %r out of the DECIMAL range' % (text,))
+        return cls(sign == '-', coefficient >> 64, coefficient & ((1 << 64) - 1),
+                   len(fraction))
 
     def to_bytes(self):
         """
         >>> Decimal(False, 0, 5123456, 6).to_bytes()
         b'\\x00\\x00\\x06\\x00\\x00\\x00\\x00\\x00\\x80-N\\x00\\x00\\x00\\x00\\x00'
         """
-        bt = struct.pack(b'<H', 0)
-        bt += struct.pack(b'<B', self.scale)
-        bt += struct.pack(b'<B', 0x80 if self.sign else 0x00)
-        bt += struct.pack(b'<I', self.high)
-        bt += struct.pack(b'<Q', self.low)
-
-        return bytes(bt)
+        return struct.pack('<HBBIQ', 0, self.scale, 0x80 if self.sign else 0,
+                           self.high, self.low)
 
     def __str__(self):
         """

@@ -33,7 +33,7 @@ class NbfseTests(unittest.TestCase):
         self.assertEqual('<widget>1</widget>', decoded.render_xml())
         self.assertEqual(second, decoded.to_bytes())
         # A standalone MC-NBFX parser MUST reject session dictionary IDs.
-        with self.assertRaises(KeyError):
+        with self.assertRaises(ValueError):
             Record.parse(io.BytesIO(second[1:]))
 
     def test_microsoft_official_soap_example_with_string_table(self):
@@ -112,7 +112,7 @@ class NbfseTests(unittest.TestCase):
                    b'\x02\x01a\x00', b'\x00\x42\x01\x01',
                    b'\x00\x40\x01x\xaa\x01\x01']
         for data in invalid:
-            with self.subTest(data=data), self.assertRaises((ValueError, KeyError, UnicodeError)):
+            with self.subTest(data=data), self.assertRaises(ValueError):
                 BinaryXmlSession().parse_document(data)
 
     def test_atomic_rollback_for_bad_xml_and_bad_encoding(self):
@@ -120,7 +120,7 @@ class NbfseTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             s.parse_document(encode_string_table(['good']) + b'\x40\x01r')
         self.assertEqual({}, s.dictionary)
-        with self.assertRaises(Exception):
+        with self.assertRaises(ValueError):
             s.encode_xml('<unclosed>', new_strings=['good'])
         self.assertEqual({}, s.dictionary)
 
@@ -134,7 +134,7 @@ class NbfseTests(unittest.TestCase):
         self.assertEqual({1: 'ok'}, s.dictionary)
         s.reset()
         self.assertEqual({}, s.dictionary)
-        with self.assertRaises(KeyError):
+        with self.assertRaises(ValueError):
             s.parse_document(b'\x00\x42\x01\x01')
 
     def test_context_scoping_and_snapshot_outliving_session(self):
