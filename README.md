@@ -136,6 +136,17 @@ Known differences with .NET where the text is followed:
   digits, e.g. 100 is `1E+2` (.NET writes `100`).
 * MultiByteInt31: a non-minimal encoding is refused (.NET accepts it).
 
+Refused as the .NET binary reader refuses them (checked on .NET Framework
+4.8.1), although the text of the specification does not forbid them:
+
+* an element still open at the end of the document (section 2 only speaks
+  of "zero or more records");
+* a UTF-8 surrogate pair written as two 3-byte sequences (2.2.3.13 refers to
+  RFC 2279; RFC 3629 UTF-8 has the 4-byte form, which is read).
+
+`doc/CONFORMANCE.md` traces every requirement of MC-NBFX, MC-NBFS and
+MC-NBFSE to the code and to its test (`tests/test_spec_traceability.py`).
+
 ### Sessionful MC-NBFSE (in-band StringTable)
 
 MC-NBFSE prepends a StringTable to **each document**, assigning new strings
