@@ -201,7 +201,7 @@ class _LengthPrefixedText(Text):
         except struct.error:
             raise WcfBinaryError('%s too long (%d bytes)'
                              % (type(self).__name__, len(data))) from None
-        return struct.pack('<B', self.type) + length + data
+        return b''.join((bytes((self.type,)), length, data))  # one copy
 
     @classmethod
     def parse(cls, fp):
@@ -396,7 +396,7 @@ class QNameDictionaryTextRecord(Text):
         dictionary[self.index]  # never write an id unknown to the peer
         bt = struct.pack(b'<B', self.type)
         bt += struct.pack(b'<B', ord(self.prefix) - ord('a'))
-        bt += MultiByteInt31(self.index).to_bytes()
+        bt += mbi31_bytes(self.index)
         return bytes(bt)
 
     def __str__(self):
@@ -822,7 +822,7 @@ class DictionaryTextRecord(Text):
         """
         dictionary[self.index]  # never write an id unknown to the peer
         return bytes(super(DictionaryTextRecord, self).to_bytes() +
-                     MultiByteInt31(self.index).to_bytes())
+                     mbi31_bytes(self.index))
 
     def __str__(self):
         r"""

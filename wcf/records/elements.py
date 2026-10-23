@@ -46,7 +46,9 @@ class _ElementRecord(_NamedRecord, Element):
         self.childs = []
 
     def to_bytes(self):
-        return bytes(self._head() + b''.join(a.to_bytes() for a in self.attributes))
+        parts = self._head()
+        parts.extend([a.to_bytes() for a in self.attributes])
+        return b''.join(parts)
 
     @classmethod
     def parse(cls, fp):

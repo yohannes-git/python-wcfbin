@@ -53,7 +53,9 @@ class _AttributeRecord(_NamedRecord, Attribute):
         self.value = validate_attribute_text(args[-1]) if args else None
 
     def to_bytes(self):
-        return bytes(self._head() + validate_attribute_text(self.value).to_bytes())
+        parts = self._head()
+        parts.append(validate_attribute_text(self.value).to_bytes())
+        return b''.join(parts)
 
     @classmethod
     def parse(cls, fp):
@@ -166,12 +168,12 @@ class ShortXmlnsAttributeRecord(Attribute):
     def to_bytes(self):
         out = bytearray((self.type,))
         if self._has_prefix:
-            out += Utf8String(validate_xml_name(self.prefix, 'xmlns prefix')).to_bytes()
+            out += utf8_bytes(validate_xml_name(self.prefix, 'xmlns prefix'))
         if self._by_index:
             dictionary[self.index]  # never write an id unknown to the peer
-            out += MultiByteInt31(self.index).to_bytes()
+            out += mbi31_bytes(self.index)
         else:
-            out += Utf8String(self.value).to_bytes()
+            out += utf8_bytes(self.value)
         return bytes(out)
 
     @classmethod

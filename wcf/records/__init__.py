@@ -159,26 +159,34 @@ def dump_records(records):
     Iterative, like render_xml().
     """
     out = bytearray()
-    stack = [(iter(records), None)]  # (siblings, bytes closing their parent)
+    stack = [(iter(records), None)]  # (siblings, closing record of their parent)
     while stack:
         siblings, closing = stack[-1]
-        record = next(siblings, _END)
-        if record is _END:
-            stack.pop()
-            if closing is not None:
-                out.extend(closing)
-        elif isinstance(record, Element):
-            out.extend(record.to_bytes())
-            children = record.childs
-            if (children and isinstance(children[-1], Text) and
-                    children[-1].with_end_element and
-                    record._wcf_closure != 'explicit'):
-                # the last text record becomes its *WithEndElement form
-                value = children[-1].to_bytes()
-                stack.append((itertools.islice(children, len(children) - 1),
-                              bytes((value[0] + 1,)) + value[1:]))
-            else:
-                stack.append((iter(children), bytes((EndElementRecord.type,))))
+        for record in siblings:
+            out += record.to_bytes()
+            if isinstance(record, Element):
+                children = record.childs
+                if (children and isinstance(children[-1], Text) and
+                        children[-1].with_end_element and
+                        record._wcf_closure != 'explicit'):
+                    # the last text record is written in its *WithEndElement
+                    # form when the element is closed (only the records of
+                    # the open elements are kept)
+                    stack.append((itertools.islice(children, len(children) - 1),
+                                  children[-1].to_bytes()))
+                else:
+                    stack.append((iter(children), _END_ELEMENT))
+                break
         else:
-            out.extend(record.to_bytes())
+            stack.pop()
+            if closing is _END_ELEMENT:
+                out += closing
+            elif closing is not None:
+                # *TextWithEndElement: the type of the text record + 1,
+                # without copying a large value
+                out.append(closing[0] + 1)
+                out += memoryview(closing)[1:]
     return bytes(out)
+
+
+_END_ELEMENT = bytes((EndElementRecord.type,))

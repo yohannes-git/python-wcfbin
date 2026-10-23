@@ -399,14 +399,14 @@ class _NamedRecord(Record):
 
     def _head(self):
         """The record type and the names."""
-        out = bytearray((self.type,))
+        out = [bytes((self.type,))]
         if self._has_prefix:
-            out += Utf8String(validate_xml_name(self.prefix, self._what + ' prefix')).to_bytes()
+            out.append(utf8_bytes(validate_xml_name(self.prefix, self._what + ' prefix')))
         if self._by_index:
             validate_dictionary_xml_name(self.index, self._what + ' name')
-            out += MultiByteInt31(self.index).to_bytes()
+            out.append(mbi31_bytes(self.index))
         else:
-            out += Utf8String(validate_xml_name(self.name, self._what + ' name')).to_bytes()
+            out.append(utf8_bytes(validate_xml_name(self.name, self._what + ' name')))
         return out
 
     @classmethod
@@ -445,7 +445,7 @@ class CommentRecord(Record):
         >>> CommentRecord('test').to_bytes()
         b'\\x02\\x04test'
         """
-        return bytes((self.type,)) + Utf8String(self.comment).to_bytes()
+        return bytes((self.type,)) + utf8_bytes(self.comment)
 
     def __str__(self):
         """
