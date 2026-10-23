@@ -28,6 +28,6 @@
 #  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 __all__ = ['records', 'datatypes', 'dictionary', 'errors', 'session',
-           'xml2records', 'xmltext']
+           'xml2records', 'xmltext', 'WcfBinaryError']
 
 from wcf.errors import WcfBinaryError  # noqa: E402,F401

@@ -65,8 +65,8 @@ class Quotas:
                  dictionary strings expanded, element names counted
                  twice (start and end tags) and array items repeated.
                  render_xml() adds the markup and the escaping (up to
-                 6 characters for one, "&quot;"), so its output is
-                 bounded by a small multiple of max_chars.
+                 8 characters for one, e.g. "&#65534;"), so its output
+                 is bounded by a small multiple of max_chars.
 
     None disables a limit.
     """
@@ -109,8 +109,9 @@ _budget = ContextVar('wcf_decoding_budget', default=None)
 def charge(records, chars):
     """Account for records about to be created by the parse in progress.
 
-    Array and list items are charged before they are read, so that a
-    count that exceeds a quota is refused before anything is allocated.
+    Array items are charged before they are read, so that a count that
+    exceeds a quota is refused before anything is allocated; list items as
+    they are read.
     """
     budget = _budget.get()
     if budget is not None:
@@ -224,7 +225,8 @@ class Record(object):
                 open_element = parents[-1][1] if parents else None
             elif what is _ATTRIBUTE:
                 charge(*_attribute_cost(obj))
-                if not open_element or records is not open_element.childs or records:
+                if (open_element is None or records is not open_element.childs or
+                        records):
                     raise WcfBinaryError('Attribute outside element start')
                 open_element.attributes.append(obj)
             elif what is _END:

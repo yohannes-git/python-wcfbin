@@ -6,10 +6,8 @@ proves in CONFORMANCE.md ("NBFX-2.2.3.15-LEN-POSITIVE" is
 test_NBFX_2_2_3_15_LEN_POSITIVE). One TestCase per section of the
 specifications.
 
-The tests decorated with @nonconformant prove a requirement that the
-current code does NOT meet: they fail until the code (or the decision
-recorded in README.md) changes. Set WCF_TRACE_EXPECT_NONCONFORMANT=1 to
-run them as expected failures.
+A requirement the code does not meet (doc/CONFORMANCE.md, status
+Non-conformant) has a test that fails; there are none.
 
 Run from the top of the repository:
 
@@ -19,7 +17,6 @@ Run from the top of the repository:
 import contextlib
 import hashlib
 import io
-import os
 import struct
 import unittest
 from unittest import mock
@@ -50,20 +47,6 @@ from wcf.session import BinaryXmlSession, encode_string_table
 from wcf.xml2records import XMLParser
 
 from tests.support import local_times
-
-_EXPECT_NC = os.environ.get('WCF_TRACE_EXPECT_NONCONFORMANT') == '1'
-
-
-def nonconformant(reason):
-    """Mark a test proving a requirement that the current code does not
-    meet (it fails; an expected failure with
-    WCF_TRACE_EXPECT_NONCONFORMANT=1)."""
-    def mark(test):
-        test.__doc__ = 'NON-CONFORMANT, fails on the current code: ' + reason
-        test.nonconformant = True
-        return unittest.expectedFailure(test) if _EXPECT_NC else test
-    return mark
-
 
 def h(text):
     return bytes.fromhex(text)

@@ -30,6 +30,8 @@ from wcf.datatypes import Decimal
 from wcf.records.attributes import PREFIX_ATTRIBUTES, PREFIX_DICTIONARY_ATTRIBUTES
 from wcf.records.elements import PREFIX_ELEMENTS, PREFIX_DICTIONARY_ELEMENTS
 
+__all__ = ['XMLParser']
+
 # the record families of a name, by (prefix kind, dictionary name):
 # (no prefix, string prefix, letter prefix) x (String, DictionaryString)
 _ELEMENT_RECORDS = ((ShortElementRecord, ShortDictionaryElementRecord),

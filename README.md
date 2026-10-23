@@ -110,7 +110,9 @@ strings and their total size, and parses its documents with its `quotas`.
 and prefixes must be XML NCNames, comments must be valid XML comments, and
 characters are escaped as MC-NBFX 2.2.3.13.1 interprets them (characters
 illegal in XML as `&#digits;`), line ends as character references so that
-an XML parser keeps them.
+an XML parser keeps them. A document carrying a character that XML 1.0
+does not allow (U+0000, an unpaired surrogate...) keeps its structure but
+is not well-formed XML: an XML parser refuses it.
 
 ### Where the text of the specification is not followed
 

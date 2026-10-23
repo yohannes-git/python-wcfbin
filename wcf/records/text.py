@@ -304,8 +304,8 @@ class BoolTextRecord(Text):
         >>> BoolTextRecord(False).to_bytes()
         b'\xb4\x00'
         """
-        return bytes(struct.pack(b'<B', self.type) +
-                     struct.pack(b'<B', 1 if self.value else 0))
+        return bytes(struct.pack('<B', self.type) +
+                     struct.pack('<B', 1 if self.value else 0))
 
     def __str__(self):
         r"""
@@ -410,8 +410,8 @@ class QNameDictionaryTextRecord(Text):
         if len(self.prefix) != 1 or not 'a' <= self.prefix <= 'z':
             raise WcfBinaryError('QNameDictionaryText prefix must be a-z')
         dictionary[self.index]  # never write an id unknown to the peer
-        bt = struct.pack(b'<B', self.type)
-        bt += struct.pack(b'<B', ord(self.prefix) - ord('a'))
+        bt = struct.pack('<B', self.type)
+        bt += struct.pack('<B', ord(self.prefix) - ord('a'))
         bt += mbi31_bytes(self.index)
         return bytes(bt)
 
@@ -499,7 +499,7 @@ class DecimalTextRecord(Text):
         >>> DecimalTextRecord(Decimal(False, 0, 1337, 3)).to_bytes()
         b'\x94\x00\x00\x03\x00\x00\x00\x00\x009\x05\x00\x00\x00\x00\x00\x00'
         """
-        return bytes(super(DecimalTextRecord, self).to_bytes() +
+        return bytes(super().to_bytes() +
                      self.value.to_bytes())
 
     @classmethod
@@ -661,7 +661,7 @@ class UniqueIdTextRecord(Text):
         >>> UniqueIdTextRecord('urn:uuid:33221100-5544-7766-8899-aabbccddeeff').to_bytes()
         b'\\xac\\x00\\x11"3DUfw\\x88\\x99\\xaa\\xbb\\xcc\\xdd\\xee\\xff'
         """
-        bt = super(UniqueIdTextRecord, self).to_bytes()
+        bt = super().to_bytes()
         bt += self.uuid.bytes_le
 
         return bytes(bt)
@@ -865,7 +865,7 @@ class DictionaryTextRecord(Text):
         b'\xaa\x02'
         """
         dictionary[self.index]  # never write an id unknown to the peer
-        return bytes(super(DictionaryTextRecord, self).to_bytes() +
+        return bytes(super().to_bytes() +
                      mbi31_bytes(self.index))
 
     def __str__(self):

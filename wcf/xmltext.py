@@ -4,21 +4,28 @@ MC-NBFX only requires names to be nonempty and not "xmlns", and lets
 records carry characters that XML cannot; the XML written for them must
 still have exactly the structure of the records (no markup injected by a
 name or a comment) and represent the same characters once parsed again.
+
+A character that is not legal in XML 1.0 (U+0000, an unpaired surrogate,
+U+FFFE...) is written "&#digits;", as MC-NBFX 2.2.3.13.1 interprets it:
+the structure is kept, but such a document is not well-formed XML and an
+XML parser (this library's XMLParser included) refuses it.
 """
 
 import functools
 import re
 
+__all__ = ['ncname', 'escape_text', 'escape_attribute', 'comment']
+
 from wcf.errors import WcfBinaryError
 
 # XML 1.0 (fifth edition) NCName: a Name without ':'
-_NAME_START = ('A-Z_a-z\xc0-\xd6\xd8-\xf6\xf8-˿Ͱ-ͽ'
-               'Ϳ-῿‌‍⁰-↏Ⰰ-⿯'
-               '、-퟿豈-﷏ﷰ-�\U00010000-\U000effff')
-_NCNAME = re.compile('[%s][%s\\-.0-9\xb7̀-ͯ‿⁀]*'
+_NAME_START = ('A-Z_a-z\xc0-\xd6\xd8-\xf6\xf8-\u02ff\u0370-\u037d'
+               '\u037f-\u1fff\u200c\u200d\u2070-\u218f\u2c00-\u2fef'
+               '\u3001-\ud7ff\uf900-\ufdcf\ufdf0-\ufffd\U00010000-\U000effff')
+_NCNAME = re.compile('[%s][%s\\-.0-9\xb7\u0300-\u036f\u203f\u2040]*'
                      % (_NAME_START, _NAME_START))
 # characters outside the XML 1.0 Char production
-_NOT_XML_CHAR = re.compile('[^\t\n\r\x20-퟿-�'
+_NOT_XML_CHAR = re.compile('[^\t\n\r\x20-\ud7ff\ue000-\ufffd'
                            '\U00010000-\U0010ffff]')
 # the characters that escape_text() / escape_attribute() replace: a value
 # without any (one scan of the regex engine) is returned as it is, without

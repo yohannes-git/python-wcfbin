@@ -26,6 +26,18 @@
 #  THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 #  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 #  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+"""The MC-NBFS static dictionary and the MC-NBFSE session dictionaries."""
+
+from collections import ChainMap
+from collections.abc import Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
+
+from wcf.errors import WcfBinaryError
+
+__all__ = ['dictionary', 'inverted_dict', 'static_dictionary',
+           'static_inverted_dict', 'dictionary_context', 'UnknownDictionaryId']
+
 dictionary = {
 0x00 : 'mustUnderstand',
 0x02 : 'Envelope',
@@ -522,13 +534,6 @@ inverted_dict = {v: k for k, v in dictionary.items()}
 # for a dictionary negotiated incrementally across a session.  Keep the
 # immutable static entries separate from session data.  A scoped mapping
 # avoids leaking strings between connections/threads/coroutines.
-from collections import ChainMap
-from collections.abc import Mapping
-
-from wcf.errors import WcfBinaryError
-from contextlib import contextmanager
-from contextvars import ContextVar
-
 static_dictionary = dictionary
 static_inverted_dict = inverted_dict
 _session_dictionary = ContextVar('wcf_nbfse_dictionary', default=None)
@@ -649,7 +654,10 @@ def dictionary_context(session_entries, reverse=None):
     ``session_entries`` is a mapping of odd integer IDs to Unicode strings,
     ``reverse`` the matching string to ID mapping when the caller already
     maintains one. Neither is copied: they must not change while the
-    context is active.
+    context is active. They are looked up with dict.get(), a ChainMap
+    being flattened into its maps when the context is entered (a map
+    added to the ChainMap afterwards is not seen, and a __missing__ of
+    the mappings is not used).
     This is intentionally scoped: plain MC-NBFS must not accept session IDs.
     """
     token = _session_dictionary.set(_SessionMaps(session_entries, reverse))

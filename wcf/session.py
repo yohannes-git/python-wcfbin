@@ -19,6 +19,8 @@ from wcf.dictionary import dictionary_context
 from wcf.records import DEFAULT_QUOTAS, Record, dump_records, render_xml
 from wcf.xml2records import XMLParser
 
+__all__ = ['BinaryXmlSession', 'SessionDocument', 'encode_string_table']
+
 
 class SessionDocument:
     """An NBFX tree with the StringTable and resolver that produced it.
