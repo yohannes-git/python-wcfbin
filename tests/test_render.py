@@ -49,7 +49,8 @@ class RenderInjectionTests(unittest.TestCase):
             render_xml([ShortDictionaryElementRecord(1)])
 
     def test_comment(self):
-        for comment in ('--><injected/><!--', 'a--b', 'end-'):
+        for comment in ('--><injected/><!--', 'a--b', 'end-', 'a\x00b',
+                        'a\rb', '\ufffe'):
             with self.subTest(comment=comment), self.assertRaises(ValueError):
                 render_xml([CommentRecord(comment)])
         self.assertEqual('<!--a-b c-->', render_xml([CommentRecord('a-b c')]))

@@ -78,11 +78,16 @@ def escape_attribute(value):
 def comment(text):
     """A comment, ValueError if XML cannot carry it.
 
+    A comment cannot contain "--" nor end with "-", and nothing is
+    escaped in it: a character reference would be read as literal text
+    and a CR would be normalized, so characters that are not legal in
+    XML and CRs are refused too.
+
     >>> comment('a-b')
     '<!--a-b-->'
     """
-    # XML comments cannot contain "--" nor end with "-"
-    if '--' in text or text.endswith('-'):
+    if ('--' in text or text.endswith('-') or '\r' in text or
+            _NOT_XML_CHAR.search(text)):
         raise ValueError('MC-NBFX comment %r cannot be represented in XML'
                          % (text,))
-    return '<!--%s-->' % _escape(text, {})
+    return '<!--%s-->' % text
