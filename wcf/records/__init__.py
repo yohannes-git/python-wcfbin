@@ -39,86 +39,125 @@ from wcf.records.text import *
 from wcf.records.attributes import *
 from wcf.records.elements import *
 
-def print_records(records, skip=0, fp=None, first_call=True):
-    """prints the given record tree into a file like object
-    
-    :param records: a tree of record objects
-    :type records: wcf.records.Record
-    :param skip: start value for intending (Default: 0)
-    :type skip: int
-    :param fp: file like object to print to (Default: sys.stdout)
-    
-    """
-    if records == None:
-        return
-    if fp == None:
-        fp = sys.stdout
+from xml.sax.saxutils import escape
+from wcf.dictionary import dictionary
 
-    was_el = False
-    for r in records:
-        if isinstance(r, EndElementRecord):
-            continue
-        if isinstance(r, Element):
-            fp.write(('\n' if not first_call else '') + ' ' * skip + str(r))
+
+def _name(obj):
+    name = dictionary[obj.index] if not hasattr(obj, 'name') else obj.name
+    return '%s:%s' % (obj.prefix, name) if hasattr(obj, 'prefix') else name
+
+
+def _text(record):
+    # Char records have a raw lexical value. __str__ of Chars* already
+    # escapes it, so calling escape(str(record)) would double-escape.
+    if isinstance(record, (Chars8TextRecord, UnicodeChars8TextRecord)):
+        return record.value
+    return str(record)
+
+
+def _attr(record):
+    if isinstance(record, (ShortXmlnsAttributeRecord,
+                           ShortDictionaryXmlnsAttributeRecord)):
+        name = 'xmlns'
+        value = dictionary[record.index] if hasattr(record, 'index') else record.value
+    elif isinstance(record, (XmlnsAttributeRecord,
+                             DictionaryXmlnsAttributeRecord)):
+        prefix = record.name if hasattr(record, 'name') else record.prefix
+        name = 'xmlns:' + prefix
+        value = dictionary[record.index] if hasattr(record, 'index') else record.value
+    else:
+        name = _name(record)
+        value = _text(record.value)
+    # XML attribute whitespace must be preserved using character references.
+    escaped = escape(value, {'"': '&quot;', '\t': '&#x9;',
+                             '\r': '&#xD;', '\n': '&#xA;'})
+    return ' %s="%s"' % (name, escaped)
+
+
+def _render_nodes(records):
+    parts = []
+    records = list(records)
+    i = 0
+    while i < len(records):
+        r = records[i]
+        if isinstance(r, ArrayRecord):
+            name = _name(r.element)
+            attrs = ''.join(_attr(a) for a in r.element.attributes + r.attributes)
+            for value in r.data:
+                parts.append('<%s%s>%s</%s>' % (
+                    name, attrs, escape(_text(value)), name))
+        elif isinstance(r, Element):
+            if isinstance(r, EndElementRecord):
+                raise ValueError('Unexpected EndElement in record tree')
+            name = _name(r)
+            parts.append('<%s%s>' % (
+                name, ''.join(_attr(a) for a in r.attributes)))
+            parts.append(_render_nodes(r.childs))
+            parts.append('</%s>' % name)
+        elif isinstance(r, CommentRecord):
+            parts.append('<!--%s-->' % r.comment)
+        elif isinstance(r, StartListTextRecord):
+            parts.append(escape(' '.join(_text(value) for value in r.values)))
+        elif isinstance(r, EndListTextRecord):
+            raise ValueError('WCF EndListText without StartListText')
+        elif isinstance(r, Text):
+            parts.append(escape(_text(r)))
         else:
-            fp.write(str(r))
-       
-        new_line = False
-        if hasattr(r, 'childs'):
-            new_line = print_records(r.childs, skip+1, fp, False)
-        if isinstance(r, Element):
-            if new_line:
-                fp.write('\n' + ' ' * skip)
-            if hasattr(r, 'prefix'):
-                fp.write('</%s:%s>' % (r.prefix, r.name))
-            else:
-                fp.write('</%s>' % r.name)
-            was_el = True
-        else:
-            was_el = False
-    return was_el
+            raise ValueError('Cannot render record %s as XML' % type(r).__name__)
+        i += 1
+    return ''.join(parts)
+
+
+def render_xml(records):
+    """Produce XML without introducing whitespace or altering text values."""
+    return _render_nodes(records)
+
+
+def print_records(records, skip=0, fp=None, first_call=True):
+    """Print the character-equivalent XML, without pretty-print whitespace.
+
+    ``skip`` and ``first_call`` remain accepted for source compatibility.
+    """
+    if fp is None:
+        fp = sys.stdout
+    if records is not None:
+        fp.write(render_xml(records))
+
 
 def repr_records(records, skip=0):
-    if records == None:
+    if records is None:
         return
-
     for r in records:
-        print(' '*skip + str(r))
+        print(' ' * skip + str(r))
         if hasattr(r, 'childs'):
-            repr_records(r.childs, skip+1)
+            repr_records(r.childs, skip + 1)
+
 
 def dump_records(records):
+    """Serialize a tree to MC-NBFX, without mutating its records.
+
+    Closure style decoded from wire is retained: explicit EndElement (0x01)
+    remains explicit, and TextWithEndElement remains implicit. Newly created
+    trees use TextWithEndElement for their final text child by default.
     """
-    returns the byte representation of a given record tree
-
-    :param records: the record tree
-    :type records: wcf.records.Record
-    :returns: a bytestring
-    :rtype: str|bytes
-    """
-    out = b''
-
-    for r in records:
-        msg = 'Write %s' % type(r).__name__
-        if r == records[-1]:
-            if isinstance(r, Text):
-                r.type = r.type + 1
-                msg += ' with EndElement (0x%X)' % r.type
-        log.debug(msg)
-        log.debug('Value %s' % str(r))
-        if isinstance(r, Element) and not isinstance(r, EndElementRecord) and len(r.attributes):
-            log.debug(' Attributes:')
-            for a in r.attributes:
-                log.debug(' %s: %s' % (type(a).__name__, str(a)))
-        out += r.to_bytes()
-        
-        if hasattr(r, 'childs'):
-            out += dump_records(r.childs)
-            if len(r.childs) == 0 or not isinstance(r.childs[-1], Text):
-                log.debug('Write EndElement for %s' % r.name)
-                out += EndElementRecord().to_bytes()
-        elif isinstance(r, Element) and not isinstance(r, EndElementRecord):
-            log.debug('Write EndElement for %s' % (r.name,))
-            out += EndElementRecord().to_bytes()
-
-    return out
+    out = bytearray()
+    for record in records:
+        if isinstance(record, Element) and not isinstance(record, EndElementRecord):
+            out.extend(record.to_bytes())
+            children = getattr(record, 'childs', [])
+            implicit = (bool(children) and isinstance(children[-1], Text) and
+                        children[-1].type not in (0xA4, 0xA6) and
+                        getattr(record, '_wcf_closure', None) != 'explicit')
+            if implicit:
+                out.extend(dump_records(children[:-1]))
+                last = children[-1]
+                value = last.to_bytes()
+                out.append(last.type + 1)
+                out.extend(value[1:])
+            else:
+                out.extend(dump_records(children))
+                out.append(EndElementRecord.type)
+        else:
+            out.extend(record.to_bytes())
+    return bytes(out)

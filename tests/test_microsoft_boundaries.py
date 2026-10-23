@@ -1,0 +1,182 @@
+"""Additional normative MC-NBFX regression and boundary cases.
+
+These tests intentionally do not depend on the historic implementation tests:
+MC-NBFX 2.2.1-2.2.3; MC-NBFSE dictionary resolution is covered as well.
+"""
+import io
+import math
+import random
+import struct
+import unittest
+
+from wcf.dictionary import dictionary_context
+from wcf.records import Record
+from wcf.records.attributes import (
+    AttributeRecord, DictionaryAttributeRecord, DictionaryXmlnsAttributeRecord,
+    PrefixAttributeARecord, PrefixDictionaryAttributeARecord, ShortAttributeRecord,
+    ShortDictionaryAttributeRecord, XmlnsAttributeRecord,
+)
+from wcf.records.elements import (
+    DictionaryElementRecord, ElementRecord, PrefixDictionaryElementARecord,
+    PrefixElementARecord, ShortDictionaryElementRecord, ShortElementRecord,
+)
+from wcf.records.text import (
+    Bytes32TextRecord, Chars32TextRecord, DoubleTextRecord, FloatTextRecord,
+    StartListTextRecord, TrueTextRecord, UnicodeChars32TextRecord,
+)
+
+
+def decode(raw):
+    return Record.parse(io.BytesIO(raw))
+
+
+class TextRepresentations(unittest.TestCase):
+    def test_float32_normative_examples(self):
+        self.assertEqual('1.1', str(FloatTextRecord.parse(io.BytesIO(bytes.fromhex('cdcc8c3f')))))
+        self.assertEqual('32.45', str(FloatTextRecord.parse(io.BytesIO(bytes.fromhex('cdcc0142')))))
+
+    def test_double_special_and_exponent(self):
+        for record in (FloatTextRecord, DoubleTextRecord):
+            self.assertEqual('-0', str(record(-0.0)))
+            self.assertEqual('NaN', str(record(float('nan'))))
+            self.assertEqual('INF', str(record(float('inf'))))
+            self.assertEqual('-INF', str(record(float('-inf'))))
+            self.assertEqual('1E+20', str(record(1e20)))
+            self.assertEqual('1E-7', str(record(1e-7)))
+            self.assertEqual('1', str(record(1.0)))
+
+    def test_shortest_roundtrip_random_ieee_bits(self):
+        randomizer = random.Random(0xBF00)
+        for byte_len, record_cls in ((4, FloatTextRecord), (8, DoubleTextRecord)):
+            fmt = '<f' if byte_len == 4 else '<d'
+            for _ in range(2500):
+                original = randomizer.getrandbits(byte_len * 8).to_bytes(byte_len, 'little')
+                value = struct.unpack(fmt, original)[0]
+                if math.isnan(value):
+                    continue
+                text = str(record_cls(value))
+                self.assertEqual(original, struct.pack(fmt, float(text)), (original.hex(), text))
+                if 'E' in text:
+                    self.assertNotIn('e', text)
+                    self.assertRegex(text, r'E[+-]\d+$')
+
+    def test_float32_minimal_significand_on_boundary(self):
+        # 1.1 requires only two significant digits, even though Python stores
+        # a 32-bit float in a float64 object when unpacking.
+        value = struct.unpack('<f', bytes.fromhex('cdcc8c3f'))[0]
+        self.assertEqual('1.1', str(FloatTextRecord(value)))
+
+    def test_chars32_signed_positive_length(self):
+        for n in (0, -1, -2147483648):
+            with self.subTest(length=n), self.assertRaises(ValueError):
+                decode(b'@\x01r\x9d' + struct.pack('<i', n))
+        with self.assertRaises(ValueError):
+            Chars32TextRecord('').to_bytes()
+        self.assertEqual(b'\x9c\x01\x00\x00\x00a', Chars32TextRecord('a').to_bytes())
+
+    def test_bytes32_signed_positive_length(self):
+        for n in (0, -1, -2147483648):
+            with self.subTest(length=n), self.assertRaises(ValueError):
+                decode(b'@\x01r\xa3' + struct.pack('<i', n))
+        with self.assertRaises(ValueError):
+            Bytes32TextRecord(b'').to_bytes()
+        self.assertEqual(b'\xa2\x01\x00\x00\x00a', Bytes32TextRecord(b'a').to_bytes())
+
+    def test_unicode_chars32_uses_multibyte_int31(self):
+        for value in ('abc', 'é' * 70, 'a' * 32769):
+            with self.subTest(length=len(value)):
+                rec = UnicodeChars32TextRecord(value)
+                raw = rec.to_bytes()
+                self.assertEqual(0xBA, raw[0])
+                self.assertEqual(value, str(UnicodeChars32TextRecord.parse(io.BytesIO(raw[1:]))))
+        self.assertEqual(bytes.fromhex('ba 06 61 00 62 00 63 00'),
+                         UnicodeChars32TextRecord('abc').to_bytes())
+        with self.assertRaises(ValueError):
+            UnicodeChars32TextRecord.parse(io.BytesIO(b'\x03abc'))
+
+
+class NameAndAttributeValidation(unittest.TestCase):
+    def test_unqualified_attribute_requires_text(self):
+        with self.assertRaises(ValueError):
+            decode(bytes.fromhex('40 01 72 04 01 61 40 01 78 01'))
+        for cls in (ShortAttributeRecord,):
+            with self.assertRaises(ValueError):
+                cls('a', ShortElementRecord('bad'))
+        with self.assertRaises(ValueError):
+            ShortAttributeRecord('a', None)
+
+    def test_all_attribute_value_families(self):
+        bad_value = b'\x40\x01x\x01'
+        examples = (
+            b'\x04\x01a',              # ShortAttribute
+            b'\x05\x01a\x01b',       # Attribute
+            b'\x06\x02',              # ShortDictionaryAttribute
+            b'\x07\x01a\x02',        # DictionaryAttribute
+            b'\x26\x01b',             # PrefixAttributeA
+            b'\x0c\x02',              # PrefixDictionaryAttributeA
+        )
+        for header in examples:
+            with self.subTest(header=header.hex()), self.assertRaises(ValueError):
+                decode(b'\x40\x01r' + header + bad_value)
+
+    def test_reject_empty_or_reserved_literal_names(self):
+        for local in ('', 'xmlns'):
+            for maker in (
+                lambda: ShortElementRecord(local),
+                lambda: ElementRecord('p', local),
+                lambda: PrefixElementARecord(local),
+                lambda: ShortAttributeRecord(local, TrueTextRecord()),
+                lambda: AttributeRecord('p', local, TrueTextRecord()),
+                lambda: PrefixAttributeARecord(local, TrueTextRecord()),
+            ):
+                with self.subTest(local=local, cls=maker), self.assertRaises(ValueError):
+                    maker()
+        for maker in (
+            lambda: ElementRecord('', 'e'),
+            lambda: AttributeRecord('', 'a', TrueTextRecord()),
+            lambda: DictionaryXmlnsAttributeRecord('', 6),
+            lambda: XmlnsAttributeRecord('', 'urn:example'),
+            lambda: AttributeRecord('xmlns', 'a', TrueTextRecord()),
+        ):
+            with self.assertRaises(ValueError):
+                maker()
+
+    def test_reject_invalid_names_after_mutation(self):
+        for maker, attribute in (
+            (ShortElementRecord('a'), 'name'),
+            (ShortAttributeRecord('a', TrueTextRecord()), 'name'),
+            (AttributeRecord('p', 'a', TrueTextRecord()), 'prefix'),
+        ):
+            setattr(maker, attribute, 'xmlns')
+            with self.assertRaises(ValueError):
+                maker.to_bytes()
+        attr = ShortAttributeRecord('a', TrueTextRecord())
+        attr.value = ShortElementRecord('b')
+        with self.assertRaises(ValueError):
+            attr.to_bytes()
+
+    def test_dictionary_names_checked_against_session_table(self):
+        with dictionary_context({1: '', 3: 'xmlns', 5: 'widget'}):
+            for index in (1, 3):
+                with self.subTest(index=index), self.assertRaises(ValueError):
+                    ShortDictionaryElementRecord(index)
+                for maker in (
+                    lambda: ShortDictionaryAttributeRecord(index, TrueTextRecord()),
+                    lambda: DictionaryAttributeRecord('p', index, TrueTextRecord()),
+                    lambda: PrefixDictionaryAttributeARecord(index, TrueTextRecord()),
+                ):
+                    attr = maker()
+                    with self.assertRaises(ValueError):
+                        attr.to_bytes()
+            self.assertEqual('widget', ShortDictionaryElementRecord(5).name)
+            self.assertTrue(ShortDictionaryAttributeRecord(5, TrueTextRecord()).to_bytes())
+
+    def test_list_text_still_allowed_in_attribute(self):
+        record = ShortAttributeRecord('list', StartListTextRecord([TrueTextRecord()]))
+        raw = record.to_bytes()
+        self.assertIsInstance(ShortAttributeRecord.parse(io.BytesIO(raw[1:])).value,
+                              StartListTextRecord)
+
+
+if __name__ == '__main__':
+    unittest.main()

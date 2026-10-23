@@ -53,8 +53,8 @@ class ShortAttributeRecord(Attribute):
     type = 0x04
 
     def __init__(self, name, value):
-        self.name = name
-        self.value = value
+        self.name = validate_xml_name(name, 'attribute name')
+        self.value = validate_attribute_text(value)
 
     def to_bytes(self):
         """
@@ -62,8 +62,8 @@ class ShortAttributeRecord(Attribute):
         b'\\x04\\x04test\\x86'
         """
         bt = super(ShortAttributeRecord, self).to_bytes()
-        bt += Utf8String(self.name).to_bytes()
-        bt += self.value.to_bytes()
+        bt += Utf8String(validate_xml_name(self.name, 'attribute name')).to_bytes()
+        bt += validate_attribute_text(self.value).to_bytes()
 
         return bytes(bt)
 
@@ -82,19 +82,16 @@ class ShortAttributeRecord(Attribute):
         <TrueTextRecord(type=0x86)>
         """
         name = Utf8String.parse(fp).value
-        type = struct.unpack(b'<B', fp.read(1))[0]
-        value = Record.records[type].parse(fp)
-
-        return cls(name, value)
+        return cls(name, read_attribute_text(fp))
 
 
 class AttributeRecord(Attribute):
     type = 0x05
 
     def __init__(self, prefix, name, value):
-        self.prefix = prefix
-        self.name = name
-        self.value = value
+        self.prefix = validate_xml_name(prefix, 'attribute prefix')
+        self.name = validate_xml_name(name, 'attribute name')
+        self.value = validate_attribute_text(value)
 
     def to_bytes(self):
         """
@@ -102,9 +99,9 @@ class AttributeRecord(Attribute):
         b'\\x05\\x01x\\x04test\\x86'
         """
         bt = super(AttributeRecord, self).to_bytes()
-        bt += Utf8String(self.prefix).to_bytes()
-        bt += Utf8String(self.name).to_bytes()
-        bt += self.value.to_bytes()
+        bt += Utf8String(validate_xml_name(self.prefix, 'attribute prefix')).to_bytes()
+        bt += Utf8String(validate_xml_name(self.name, 'attribute name')).to_bytes()
+        bt += validate_attribute_text(self.value).to_bytes()
 
         return bytes(bt)
 
@@ -125,11 +122,8 @@ class AttributeRecord(Attribute):
         <TrueTextRecord(type=0x86)>
         """
         prefix = Utf8String.parse(fp).value
-        name   = Utf8String.parse(fp).value
-        type   = struct.unpack(b'<B', fp.read(1))[0]
-        value  = Record.records[type].parse(fp)
-
-        return cls(prefix, name, value)
+        name = Utf8String.parse(fp).value
+        return cls(prefix, name, read_attribute_text(fp))
 
 
 class ShortDictionaryAttributeRecord(Attribute):
@@ -137,16 +131,17 @@ class ShortDictionaryAttributeRecord(Attribute):
 
     def __init__(self, index, value):
         self.index = index
-        self.value = value
+        self.value = validate_attribute_text(value)
 
     def to_bytes(self):
         """
-        >>> ShortDictionaryAttributeRecord(3, TrueTextRecord()).to_bytes()
-        b'\\x06\\x03\\x86'
+        >>> ShortDictionaryAttributeRecord(2, TrueTextRecord()).to_bytes()
+        b'\\x06\\x02\\x86'
         """
         bt = super(ShortDictionaryAttributeRecord, self).to_bytes()
+        validate_dictionary_xml_name(self.index, 'attribute name')
         bt += MultiByteInt31(self.index).to_bytes()
-        bt += self.value.to_bytes()
+        bt += validate_attribute_text(self.value).to_bytes()
 
         return bytes(bt)
 
@@ -167,19 +162,17 @@ class ShortDictionaryAttributeRecord(Attribute):
         'To="true"'
         """
         index = MultiByteInt31.parse(fp).value
-        type  = struct.unpack(b'<B', fp.read(1))[0]
-        value = Record.records[type].parse(fp)
-
-        return cls(index, value)
+        validate_dictionary_xml_name(index, 'attribute name')
+        return cls(index, read_attribute_text(fp))
 
 
 class DictionaryAttributeRecord(Attribute):
     type = 0x07
 
     def __init__(self, prefix, index, value):
-        self.prefix = prefix
+        self.prefix = validate_xml_name(prefix, 'attribute prefix')
         self.index = index
-        self.value = value
+        self.value = validate_attribute_text(value)
 
     def to_bytes(self):
         """
@@ -187,9 +180,10 @@ class DictionaryAttributeRecord(Attribute):
         b'\\x07\\x01x\\x02\\x86'
         """
         bt = super(DictionaryAttributeRecord, self).to_bytes()
-        bt += Utf8String(self.prefix).to_bytes()
+        bt += Utf8String(validate_xml_name(self.prefix, 'attribute prefix')).to_bytes()
+        validate_dictionary_xml_name(self.index, 'attribute name')
         bt += MultiByteInt31(self.index).to_bytes()
-        bt += self.value.to_bytes()
+        bt += validate_attribute_text(self.value).to_bytes()
 
         return bytes(bt)
 
@@ -212,10 +206,8 @@ class DictionaryAttributeRecord(Attribute):
         """
         prefix = Utf8String.parse(fp).value
         index = MultiByteInt31.parse(fp).value
-        type  = struct.unpack(b'<B', fp.read(1))[0]
-        value = Record.records[type].parse(fp)
-
-        return cls(prefix, index, value)
+        validate_dictionary_xml_name(index, 'attribute name')
+        return cls(prefix, index, read_attribute_text(fp))
 
 
 class ShortDictionaryXmlnsAttributeRecord(Attribute):
@@ -256,7 +248,7 @@ class DictionaryXmlnsAttributeRecord(Attribute):
     type = 0x0B
 
     def __init__(self, prefix, index):
-        self.prefix = prefix
+        self.prefix = validate_xml_name(prefix, 'xmlns prefix')
         self.index = index
 
     def __str__(self):
@@ -268,7 +260,7 @@ class DictionaryXmlnsAttributeRecord(Attribute):
         b'\\x0b\\x01\x61\\x06'
         """
         bt = struct.pack(b'<B', self.type)
-        bt += Utf8String(self.prefix).to_bytes()
+        bt += Utf8String(validate_xml_name(self.prefix, 'xmlns prefix')).to_bytes()
         bt += MultiByteInt31(self.index).to_bytes()
 
         return bytes(bt)
@@ -328,7 +320,7 @@ class XmlnsAttributeRecord(Attribute):
 
     def __init__(self, name, value, *args, **kwargs):
         super(XmlnsAttributeRecord, self).__init__(*args, **kwargs)
-        self.name = name
+        self.name = validate_xml_name(name, 'xmlns prefix')
         self.value = value
 
     def to_bytes(self):
@@ -337,7 +329,7 @@ class XmlnsAttributeRecord(Attribute):
         b'\\t\\x04name\\x05value'
         """
         bt = struct.pack(b'<B', self.type)
-        bt += Utf8String(self.name).to_bytes()
+        bt += Utf8String(validate_xml_name(self.name, 'xmlns prefix')).to_bytes()
         bt += Utf8String(self.value).to_bytes()
         return bytes(bt)
 
@@ -366,9 +358,9 @@ class PrefixAttributeRecord(AttributeRecord):
         >>> PrefixAttributeARecord('name', TrueTextRecord()).to_bytes()
         b'&\x04name\x86'
         """
-        string = Utf8String(self.name)
+        string = Utf8String(validate_xml_name(self.name, 'attribute name'))
         return bytes(struct.pack(b'<B', self.type) + string.to_bytes() +
-                     self.value.to_bytes())
+                     validate_attribute_text(self.value).to_bytes())
 
     @classmethod
     def parse(cls, fp):
@@ -380,9 +372,7 @@ class PrefixAttributeRecord(AttributeRecord):
         'a:name="true"'
         """
         name = Utf8String.parse(fp).value
-        type = struct.unpack(b'<B', fp.read(1))[0]
-        value= Record.records[type].parse(fp)
-        return cls(name, value)
+        return cls(name, read_attribute_text(fp))
 
 
 class PrefixDictionaryAttributeRecord(DictionaryAttributeRecord):
@@ -395,9 +385,10 @@ class PrefixDictionaryAttributeRecord(DictionaryAttributeRecord):
         >>> PrefixDictionaryAttributeBRecord(2, TrueTextRecord()).to_bytes()
         b'\r\x02\x86'
         """
+        validate_dictionary_xml_name(self.index, 'attribute name')
         idx = MultiByteInt31(self.index)
         return bytes(struct.pack(b'<B', self.type) + idx.to_bytes() +
-                     self.value.to_bytes())
+                     validate_attribute_text(self.value).to_bytes())
 
     @classmethod
     def parse(cls, fp):
@@ -409,9 +400,8 @@ class PrefixDictionaryAttributeRecord(DictionaryAttributeRecord):
         'b:Envelope="true"'
         """
         index = MultiByteInt31.parse(fp).value
-        type = struct.unpack(b'<B', fp.read(1))[0]
-        value = Record.records[type].parse(fp)
-        return cls(index, value)
+        validate_dictionary_xml_name(index, 'attribute name')
+        return cls(index, read_attribute_text(fp))
 
 
 Record.add_records((

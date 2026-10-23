@@ -1,0 +1,20 @@
+Microsoft MC-NBFX/NBFS/NBFSE corrective audit; 2026-10-23
+
+python -m tests.alltests
+.........................................................................................................................................................................................
+----------------------------------------------------------------------
+Ran 185 tests in 0.322s
+
+OK
+
+python -m unittest discover -s tests -p test_*.py
+..............................................................................
+----------------------------------------------------------------------
+Ran 78 tests in 0.242s
+
+OK
+
+CLI smoke checks: XML <-> NBFX; XML <-> NBFSE; both preserve Version=8.0 as text: PASS
+Source example.bin: NBFX parse/dump byte exact match: PASS
+Microsoft .NET / WCF real endpoint interoperability: NOT TESTED (unavailable)
+This local suite is not full protocol certification.

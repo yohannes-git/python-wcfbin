@@ -33,13 +33,74 @@ from builtins import str, chr, bytes, int
 import struct
 import base64
 import datetime
+import decimal
 import logging
+import math
 import uuid
 
 from xml.sax.saxutils import escape
 
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
+
+
+def _read_exact(fp, length):
+    data = fp.read(length)
+    if len(data) != length:
+        raise ValueError('Truncated WCF text record (expected %d bytes)' % length)
+    return data
+
+
+def _positive_int32_length(length, record_name):
+    """MC-NBFX Chars32/Bytes32 store a *positive signed* INT32 length."""
+    if not 0 < length <= 0x7fffffff:
+        raise ValueError('%s length must be a positive INT32' % record_name)
+    return length
+
+
+def _shortest_ieee754_text(value, single_precision):
+    """MC-NBFX 2.2.3.9/10: shortest round-trippable decimal representation.
+
+    float32 has at most nine significant decimal digits; float64 has at most
+    seventeen. Compare the *bits* of each round-trip candidate so that this
+    does not accidentally display the expanded float64 approximation of a
+    decoded float32. Do not infer a type from untyped XML input here.
+    """
+    code = '<f' if single_precision else '<d'
+    maximum_digits = 9 if single_precision else 17
+    original = struct.pack(code, value)
+    rounded = struct.unpack(code, original)[0]
+    if math.isnan(rounded):
+        return 'NaN'
+    if math.isinf(rounded):
+        return '-INF' if rounded < 0 else 'INF'
+    if rounded == 0:
+        return '-0' if math.copysign(1.0, rounded) < 0 else '0'
+
+    for digits in range(1, maximum_digits + 1):
+        candidate = format(rounded, '.%dg' % digits)
+        try:
+            if struct.pack(code, float(candidate)) == original:
+                break
+        except (OverflowError, ValueError):
+            continue
+    else:
+        raise ValueError('Cannot render MC-NBFX floating-point value')
+
+    # Choose ordinary decimal only when the point falls within the range of
+    # significant digits. Outside that range MC-NBFX requires E[+-]exponent.
+    as_decimal = decimal.Decimal(candidate)
+    negative = as_decimal.is_signed()
+    sign, digit_tuple, exponent = as_decimal.as_tuple()
+    figures = ''.join(map(str, digit_tuple))
+    decimal_position = len(figures) + exponent
+    if 1 <= decimal_position <= len(figures):
+        return format(as_decimal, 'f')
+
+    mantissa = figures[:1]
+    if len(figures) > 1:
+        mantissa += '.' + figures[1:]
+    return ('-' if negative else '') + mantissa + 'E%+d' % (decimal_position - 1)
 
 from wcf.datatypes import *
 from wcf.records.base import *
@@ -229,9 +290,9 @@ class BoolTextRecord(Text):
     def __str__(self):
         r"""
         >>> str(BoolTextRecord(True))
-        'True'
+        'true'
         """
-        return str(self.value)
+        return 'true' if self.value else 'false'
 
     @classmethod
     def parse(cls, fp):
@@ -241,8 +302,10 @@ class BoolTextRecord(Text):
         >>> BoolTextRecord.parse(fp).value
         True
         """
-        value = True if struct.unpack(b'<B', fp.read(1))[0] == 1 else False
-        return cls(value)
+        byte = struct.unpack(b'<B', fp.read(1))[0]
+        if byte not in (0, 1):
+            raise ValueError('Invalid BoolText value %d' % byte)
+        return cls(bool(byte))
 
 
 class UnicodeChars8TextRecord(Text):
@@ -261,7 +324,7 @@ class UnicodeChars8TextRecord(Text):
         >>> UnicodeChars8TextRecord(u'abc').to_bytes()
         b'\\xb6\\x06a\\x00b\\x00c\\x00'
         """
-        data = self.value.encode('utf-16')[2:]  # skip bom
+        data = self.value.encode('utf-16le')
         bt = struct.pack(b'<B', self.type)
         bt += struct.pack(b'<B', len(data))
         bt += data
@@ -283,8 +346,8 @@ class UnicodeChars8TextRecord(Text):
         'abc'
         """
         ln = struct.unpack(b'<B', fp.read(1))[0]
-        data = fp.read(ln)
-        return cls(data.decode('utf-16'))
+        data = _read_exact(fp, ln)
+        return cls(data.decode('utf-16le'))
 
 
 class UnicodeChars16TextRecord(UnicodeChars8TextRecord):
@@ -297,7 +360,7 @@ class UnicodeChars16TextRecord(UnicodeChars8TextRecord):
         >>> UnicodeChars16TextRecord(u'abc').to_bytes()
         b'\\xb8\\x06\\x00a\\x00b\\x00c\\x00'
         """
-        data = self.value.encode('utf-16')[2:]  # skip bom
+        data = self.value.encode('utf-16le')
         bt = struct.pack(b'<B', self.type)
         bt += struct.pack(b'<H', len(data))
         bt += data
@@ -312,8 +375,8 @@ class UnicodeChars16TextRecord(UnicodeChars8TextRecord):
         'abc'
         """
         ln = struct.unpack(b'<H', fp.read(2))[0]
-        data = fp.read(ln)
-        return cls(data.decode('utf-16'))
+        data = _read_exact(fp, ln)
+        return cls(data.decode('utf-16le'))
 
 
 class UnicodeChars32TextRecord(UnicodeChars8TextRecord):
@@ -322,13 +385,13 @@ class UnicodeChars32TextRecord(UnicodeChars8TextRecord):
     def to_bytes(self):
         """
         >>> UnicodeChars32TextRecord('abc').to_bytes()
-        b'\\xba\\x06\\x00\\x00\\x00a\\x00b\\x00c\\x00'
+        b'\\xba\\x06a\\x00b\\x00c\\x00'
         >>> UnicodeChars32TextRecord(u'abc').to_bytes()
-        b'\\xba\\x06\\x00\\x00\\x00a\\x00b\\x00c\\x00'
+        b'\\xba\\x06a\\x00b\\x00c\\x00'
         """
-        data = self.value.encode('utf-16')[2:]  # skip bom
+        data = self.value.encode('utf-16le')
         bt = struct.pack(b'<B', self.type)
-        bt += struct.pack(b'<I', len(data))
+        bt += MultiByteInt31(len(data)).to_bytes()
         bt += data
         return bytes(bt)
 
@@ -336,13 +399,15 @@ class UnicodeChars32TextRecord(UnicodeChars8TextRecord):
     def parse(cls, fp):
         """
         >>> from io import BytesIO
-        >>> fp = BytesIO(b'\\x06\\x00\\x00\\x00a\\x00b\\x00c\\x00')
+        >>> fp = BytesIO(b'\\x06a\\x00b\\x00c\\x00')
         >>> str(UnicodeChars32TextRecord.parse(fp))
         'abc'
         """
-        ln = struct.unpack(b'<I', fp.read(4))[0]
-        data = fp.read(ln)
-        return cls(data.decode('utf-16'))
+        ln = MultiByteInt31.parse(fp).value
+        if ln % 2:
+            raise ValueError('UTF-16 byte length must be even')
+        data = _read_exact(fp, ln)
+        return cls(data.decode('utf-16le'))
 
 
 class QNameDictionaryTextRecord(Text):
@@ -357,6 +422,8 @@ class QNameDictionaryTextRecord(Text):
         >>> QNameDictionaryTextRecord('b', 2).to_bytes()
         b'\\xbc\\x01\\x02'
         """
+        if len(self.prefix) != 1 or not 'a' <= self.prefix <= 'z':
+            raise ValueError('QNameDictionaryText prefix must be a-z')
         bt = struct.pack(b'<B', self.type)
         bt += struct.pack(b'<B', ord(self.prefix) - ord('a'))
         bt += MultiByteInt31(self.index).to_bytes()
@@ -377,7 +444,10 @@ class QNameDictionaryTextRecord(Text):
         >>> str(QNameDictionaryTextRecord.parse(fp))
         'b:Envelope'
         """
-        prefix = chr(struct.unpack(b'<B', fp.read(1))[0] + ord('a'))
+        prefix_index = struct.unpack(b'<B', _read_exact(fp, 1))[0]
+        if prefix_index >= 26:
+            raise ValueError('Invalid QNameDictionaryText prefix index')
+        prefix = chr(prefix_index + ord('a'))
         index = MultiByteInt31.parse(fp).value
         return cls(prefix, index)
 
@@ -406,13 +476,7 @@ class FloatTextRecord(Text):
         >>> str(FloatTextRecord(1.337))
         '1.337'
         """
-        try:
-            if self.value == int(self.value):
-                return '%.0f' % self.value
-            else:
-                return str(self.value)
-        except:
-            return str(self.value).upper()
+        return _shortest_ieee754_text(self.value, single_precision=True)
 
     @classmethod
     def parse(cls, fp):
@@ -450,13 +514,7 @@ class DoubleTextRecord(FloatTextRecord):
         >>> str(DoubleTextRecord(1.337))
         '1.337'
         """
-        super_self = super(DoubleTextRecord, self)
-        if hasattr(super_self, '__unicode__'):
-            # PY3
-            return super_self.__unicode__()
-        else:
-            # PY2
-            return super_self.__str__()
+        return _shortest_ieee754_text(self.value, single_precision=False)
 
     @classmethod
     def parse(cls, fp):
@@ -511,16 +569,32 @@ class DatetimeTextRecord(Text):
         self.tz = tz
 
     def __str__(self):
-        """
-        >>> str(DatetimeTextRecord(621355968000000000,0))
-        '1970-01-01T00:00:00'
-        >>> str(DatetimeTextRecord(0,0))
-        '0001-01-01T00:00:00'
-        """
-        ticks = self.value
+        """DateTimeText lexical format (MC-NBFX 2.2.3.12)."""
+        if not 0 <= self.value < 3155378976000000000:
+            raise ValueError('DateTime ticks outside Microsoft MC-NBFX range')
+        if self.tz not in (0, 1, 2):
+            raise ValueError('Invalid MC-NBFX timezone kind %s' % self.tz)
+        days, rem = divmod(self.value, 864000000000)
+        seconds, ticks = divmod(rem, 10000000)
         dt = (datetime.datetime(1, 1, 1) +
-              datetime.timedelta(microseconds=ticks // 10))
-        return dt.isoformat()
+              datetime.timedelta(days=days, seconds=seconds))
+        text = '%04d-%02d-%02d' % (dt.year, dt.month, dt.day)
+        if seconds or ticks:
+            text += 'T%02d:%02d:%02d' % (dt.hour, dt.minute, dt.second)
+            if ticks:
+                text += '.' + ('%07d' % ticks).rstrip('0')
+        if self.tz == 1:
+            text += 'Z'
+        elif self.tz == 2:
+            # MC-NBFX explicitly requires the offset of the decoding host.
+            offset = dt.astimezone().utcoffset()
+            if offset is None:
+                raise ValueError('Local UTC offset could not be determined')
+            offset_minutes = int(offset.total_seconds() / 60)
+            absolute = abs(offset_minutes)
+            text += '%s%02d:%02d' % ('+' if offset_minutes >= 0 else '-',
+                                    absolute // 60, absolute % 60)
+        return text
 
     def to_bytes(self):
         """
@@ -529,6 +603,8 @@ class DatetimeTextRecord(Text):
         >>> str(''.join('%02X' % i for i in DatetimeTextRecord(632834208000000000, 2).to_bytes()))
         '9600408EF95B47C888'
         """
+        if self.tz not in (0, 1, 2) or not 0 <= self.value < 3155378976000000000:
+            raise ValueError('Invalid MC-NBFX DateTimeText value or timezone')
         bt = super(DatetimeTextRecord, self).to_bytes()
         bt += struct.pack(
             '<Q',
@@ -542,15 +618,17 @@ class DatetimeTextRecord(Text):
         >>> from io import BytesIO
         >>> fp = BytesIO(b'\\xFF\\x3F\\x37\\xF4\\x75\\x28\\xCA\\x2B')
         >>> str(DatetimeTextRecord.parse(fp))
-        '9999-12-31T23:59:59.999999'
+        '9999-12-31T23:59:59.9999999'
         >>> fp = BytesIO(b'\\x00\\x40\\x8E\\xF9\\x5B\\x47\\xC8\\x08')
         >>> str(DatetimeTextRecord.parse(fp))
-        '2006-05-17T00:00:00'
+        '2006-05-17'
         """
         data = struct.unpack(b'<Q', fp.read(8))[0]
         tz = data >> 62
         value = data & 0x3FFFFFFFFFFFFFFF
 
+        if tz not in (0, 1, 2) or value >= 3155378976000000000:
+            raise ValueError('Invalid MC-NBFX DateTimeText bits')
         return DatetimeTextRecord(value, tz)
 
 
@@ -567,8 +645,8 @@ class Chars8TextRecord(Text):
         r"""
         >>> str(Chars8TextRecord("abc"))
         'abc'
-        >>> str(Chars8TextRecord("a<b>c>>&'\""))
-        "a&lt;b&gt;c&gt;&gt;&amp;'&quot;"
+        >>> str(Chars8TextRecord('a<b>&'))
+        'a&lt;b&gt;&amp;'
         """
         return escape(self.value)
 
@@ -593,7 +671,7 @@ class Chars8TextRecord(Text):
         'test'
         """
         ln = struct.unpack(b'<B', fp.read(1))[0]
-        value = fp.read(ln).decode('utf-8')
+        value = _read_exact(fp, ln).decode('utf-8')
         return cls(value)
 
 
@@ -621,7 +699,7 @@ class Chars16TextRecord(Chars8TextRecord):
         'test'
         """
         ln = struct.unpack(b'<H', fp.read(2))[0]
-        value = fp.read(ln).decode('utf-8')
+        value = _read_exact(fp, ln).decode('utf-8')
         return cls(value)
 
 
@@ -635,7 +713,7 @@ class Chars32TextRecord(Chars8TextRecord):
         """
         data = self.value.encode('utf-8')
         bt = struct.pack(b'<B', self.type)
-        bt += struct.pack(b'<I', len(data))
+        bt += struct.pack(b'<i', _positive_int32_length(len(data), 'Chars32Text'))
         bt += data
 
         return bytes(bt)
@@ -648,8 +726,9 @@ class Chars32TextRecord(Chars8TextRecord):
         >>> str(Chars32TextRecord.parse(fp))
         'test'
         """
-        ln = struct.unpack(b'<I', fp.read(4))[0]
-        value = fp.read(ln).decode('utf-8')
+        ln = struct.unpack(b'<i', _read_exact(fp, 4))[0]
+        _positive_int32_length(ln, 'Chars32Text')
+        value = _read_exact(fp, ln).decode('utf-8')
         return cls(value)
 
 
@@ -733,7 +812,7 @@ class Bytes8TextRecord(Text):
         b'abc'
         """
         ln = struct.unpack(b'<B', fp.read(1))[0]
-        data = struct.unpack(('%ds' % ln).encode(), fp.read(ln))[0]
+        data = _read_exact(fp, ln)
         return cls(data)
 
 
@@ -763,7 +842,7 @@ class Bytes16TextRecord(Bytes8TextRecord):
         b'abc'
         """
         ln = struct.unpack(b'<H', fp.read(2))[0]
-        data = struct.unpack(('%ds' % ln).encode(), fp.read(ln))[0]
+        data = _read_exact(fp, ln)
         return cls(data)
 
 
@@ -779,7 +858,7 @@ class Bytes32TextRecord(Bytes8TextRecord):
         b'\xa2\x03\x00\x00\x00abc'
         """
         bt = struct.pack(b'<B', self.type)
-        bt += struct.pack(b'<I', len(self.value))
+        bt += struct.pack(b'<i', _positive_int32_length(len(self.value), 'Bytes32Text'))
         bt += self.value
 
         return bytes(bt)
@@ -792,13 +871,45 @@ class Bytes32TextRecord(Bytes8TextRecord):
         >>> bytes(Bytes32TextRecord.parse(fp).value)
         b'abc'
         """
-        ln = struct.unpack(b'<I', fp.read(4))[0]
-        data = struct.unpack(('%ds' % ln).encode(), fp.read(ln))[0]
+        ln = struct.unpack(b'<i', _read_exact(fp, 4))[0]
+        _positive_int32_length(ln, 'Bytes32Text')
+        data = _read_exact(fp, ln)
         return cls(data)
 
 
 class StartListTextRecord(Text):
     type = 0xA4
+
+    def __init__(self, values=None):
+        self.values = list(values) if values is not None else []
+
+    def __str__(self):
+        return ' '.join(str(value) for value in self.values)
+
+    def to_bytes(self):
+        result = bytearray((self.type,))
+        for value in self.values:
+            if not isinstance(value, Text) or isinstance(value, (StartListTextRecord, EndListTextRecord)):
+                raise ValueError('WCF text list must contain non-list text records')
+            result.extend(value.to_bytes())
+        result.append(EndListTextRecord.type)
+        return bytes(result)
+
+    @classmethod
+    def parse(cls, fp):
+        values = []
+        while True:
+            item = fp.read(1)
+            if not item:
+                raise ValueError('Unterminated StartListText')
+            code = item[0]
+            if code == EndListTextRecord.type:
+                break
+            item_cls = Record.records.get(code)
+            if item_cls is None or not issubclass(item_cls, Text) or code in (cls.type, EndListTextRecord.type):
+                raise ValueError('Invalid record 0x%02X inside a WCF text list' % code)
+            values.append(item_cls.parse(fp))
+        return cls(values)
 
 
 class EndListTextRecord(Text):
@@ -807,6 +918,9 @@ class EndListTextRecord(Text):
 
 class EmptyTextRecord(Text):
     type = 0xA8
+
+    def __str__(self):
+        return ''
 
 
 class TimeSpanTextRecord(Text):
@@ -824,7 +938,17 @@ class TimeSpanTextRecord(Text):
                      struct.pack(b'<q', self.value))
 
     def __str__(self):
-        return str(datetime.timedelta(milliseconds=self.value/10))
+        """Format signed ticks as the WCF MC-NBFX TimeSpanText lexical form."""
+        value = abs(self.value)
+        total_seconds, fractional = divmod(value, 10000000)
+        days, rem = divmod(total_seconds, 86400)
+        hours, rem = divmod(rem, 3600)
+        minutes, seconds = divmod(rem, 60)
+        text = ('%d.' % days if days else '') + '%02d:%02d:%02d' % (
+            hours, minutes, seconds)
+        if fractional:
+            text += '.' + ('%07d' % fractional).rstrip('0')
+        return ('-' if self.value < 0 else '') + text
 
     @classmethod
     def parse(cls, fp):
@@ -832,7 +956,7 @@ class TimeSpanTextRecord(Text):
         >>> from io import BytesIO
         >>> fp = BytesIO(b'\x00Q%\x02\x00\x00\x00\x00')
         >>> str(TimeSpanTextRecord.parse(fp))
-        '1:00:00'
+        '00:00:03.6'
         """
         value = struct.unpack(b'<q', fp.read(8))[0]
         return cls(value)

@@ -47,12 +47,22 @@ class Suite(unittest.TestSuite):
     def __init__(self, *args, **kwargs):
         super(Suite, self).__init__(*args, **kwargs)
 
+        from wcf import datatypes, xml2records
+        from tests import (test_conformance, test_session, test_robustness,
+                           test_microsoft_independent, test_microsoft_boundaries)
+        self.addTest(doctest.DocTestSuite(datatypes))
+        self.addTest(doctest.DocTestSuite(xml2records))
         self.addTest(doctest.DocTestSuite(base))
         self.addTest(doctest.DocTestSuite(elements))
         self.addTest(doctest.DocTestSuite(attributes))
         self.addTest(doctest.DocTestSuite(text))
         self.addTest(TransformTest())
+        self.addTests(unittest.defaultTestLoader.loadTestsFromModule(test_conformance))
+        self.addTests(unittest.defaultTestLoader.loadTestsFromModule(test_session))
+        self.addTests(unittest.defaultTestLoader.loadTestsFromModule(test_robustness))
+        self.addTests(unittest.defaultTestLoader.loadTestsFromModule(test_microsoft_independent))
+        self.addTests(unittest.defaultTestLoader.loadTestsFromModule(test_microsoft_boundaries))
 
 if __name__ == '__main__':
-    #unittest.main()
-    unittest.TextTestRunner(verbosity=1).run(Suite())
+    result = unittest.TextTestRunner(verbosity=1).run(Suite())
+    sys.exit(0 if result.wasSuccessful() else 1)

@@ -53,7 +53,7 @@ class ShortElementRecord(Element):
 
     def __init__(self, name, *args, **kwargs):
         self.childs = []
-        self.name = name
+        self.name = validate_xml_name(name, 'element name')
         self.attributes = []
 
     def to_bytes(self):
@@ -61,7 +61,7 @@ class ShortElementRecord(Element):
         >>> ShortElementRecord('Envelope').to_bytes()
         b'@\\x08Envelope'
         """
-        string = Utf8String(self.name)
+        string = Utf8String(validate_xml_name(self.name, 'element name'))
 
         bt = (super(ShortElementRecord, self).to_bytes() +
               string.to_bytes())
@@ -95,14 +95,14 @@ class ElementRecord(ShortElementRecord):
 
     def __init__(self, prefix, name, *args, **kwargs):
         super(ElementRecord, self).__init__(name)
-        self.prefix = prefix
+        self.prefix = validate_xml_name(prefix, 'element prefix')
 
     def to_bytes(self):
         """
         >>> ElementRecord('x', 'Envelope').to_bytes()
         b'A\\x01x\\x08Envelope'
         """
-        pref = Utf8String(self.prefix)
+        pref = Utf8String(validate_xml_name(self.prefix, 'element prefix'))
         data = super(ElementRecord, self).to_bytes()
         type = data[0:1]
         return bytes(type + pref.to_bytes() + data[1:])
@@ -134,7 +134,7 @@ class ShortDictionaryElementRecord(Element):
         self.childs = []
         self.index = index
         self.attributes = []
-        self.name = dictionary[self.index]
+        self.name = validate_dictionary_xml_name(self.index, 'element name')
 
     def __str__(self):
         attribs = ' '.join([str(a) for a in self.attributes])
@@ -147,6 +147,7 @@ class ShortDictionaryElementRecord(Element):
         >>> ShortDictionaryElementRecord(2).to_bytes()
         b'B\\x02'
         """
+        validate_dictionary_xml_name(self.index, 'element name')
         string = MultiByteInt31(self.index)
 
         bt = (super(ShortDictionaryElementRecord, self).to_bytes() +
@@ -174,10 +175,10 @@ class DictionaryElementRecord(Element):
 
     def __init__(self, prefix, index, *args, **kwargs):
         self.childs = []
-        self.prefix = prefix
+        self.prefix = validate_xml_name(prefix, 'element prefix')
         self.index = index
         self.attributes = []
-        self.name = dictionary[self.index]
+        self.name = validate_dictionary_xml_name(self.index, 'element name')
 
     def __str__(self):
         """
@@ -194,7 +195,8 @@ class DictionaryElementRecord(Element):
         >>> DictionaryElementRecord('x', 2).to_bytes()
         b'C\\x01x\\x02'
         """
-        pref = Utf8String(self.prefix)
+        validate_dictionary_xml_name(self.index, 'element name')
+        pref = Utf8String(validate_xml_name(self.prefix, 'element prefix'))
         string = MultiByteInt31(self.index)
 
         bt = (super(DictionaryElementRecord, self).to_bytes() +
@@ -228,7 +230,7 @@ class PrefixElementRecord(ElementRecord):
         >>> PrefixElementARecord('test').to_bytes()
         b'^\x04test'
         """
-        string = Utf8String(self.name)
+        string = Utf8String(validate_xml_name(self.name, 'element name'))
 
         bt = (struct.pack(b'<B', self.type) +
               string.to_bytes())
@@ -259,6 +261,7 @@ class PrefixDictionaryElementRecord(DictionaryElementRecord):
         >>> PrefixDictionaryElementARecord(2).to_bytes()
         b'D\x02'
         """
+        validate_dictionary_xml_name(self.index, 'element name')
         string = MultiByteInt31(self.index)
 
         bt = (struct.pack(b'<B', self.type) +

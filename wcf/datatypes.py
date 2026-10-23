@@ -57,11 +57,13 @@ class MultiByteInt31(object):
         >>> MultiByteInt31(0x3fffffff).to_bytes()
         b'\\xff\\xff\\xff\\xff\\x03'
         """
+        if not isinstance(self.value, int) or not 0 <= self.value <= 0x7fffffff:
+            raise ValueError('MultiByteInt31 must be an unsigned 31-bit integer')
         value_a = self.value & 0x7F
         value_b = (self.value >> 7) & 0x7F
         value_c = (self.value >> 14) & 0x7F
         value_d = (self.value >> 21) & 0x7F
-        value_e = (self.value >> 28) & 0x03
+        value_e = (self.value >> 28) & 0x07
         if value_e != 0:
             ret = struct.pack(b'<BBBBB',
                               value_a | 0x80,
@@ -109,18 +111,26 @@ class MultiByteInt31(object):
         >>> mb.value
         1337
         """
-        v = 0
-        # tmp = ''
-        for pos in range(4):
-            b = fp.read(1)
-            # tmp += b
-            value = struct.unpack(b'<B', b)[0]
-            v |= (value & 0x7F) << 7*pos
-            if not value & 0x80:
-                break
-        # print ('%s => 0x%X' % (repr(tmp), v))
+        value = 0
+        for pos in range(5):
+            octet = fp.read(1)
+            if len(octet) != 1:
+                raise ValueError('Truncated MultiByteInt31')
+            byte = octet[0]
+            if pos == 4:
+                if byte & 0xF8:
+                    raise ValueError('Invalid fifth byte in MultiByteInt31')
+                value |= byte << 28
+                if value < (1 << 28):
+                    raise ValueError('Non-canonical MultiByteInt31 length')
+                return cls(value)
+            value |= (byte & 0x7F) << (pos * 7)
+            if not byte & 0x80:
+                if pos and value < (1 << (7 * pos)):
+                    raise ValueError('Non-canonical MultiByteInt31 length')
+                return cls(value)
+        raise ValueError('Invalid MultiByteInt31')
 
-        return cls(v)
 
 
 class Utf8String(object):
@@ -158,9 +168,11 @@ class Utf8String(object):
         >>> print(str(s))
         über
         """
-        lngth = struct.unpack(b'<B', fp.read(1))[0]
-
-        return cls(fp.read(lngth).decode('utf-8'))
+        length = MultiByteInt31.parse(fp).value
+        data = fp.read(length)
+        if len(data) != length:
+            raise ValueError('Truncated UTF-8 string')
+        return cls(data.decode('utf-8'))
 
 
 class Decimal(object):
@@ -178,7 +190,6 @@ class Decimal(object):
         >>> Decimal(False, 0, 5123456, 6).to_bytes()
         b'\\x00\\x00\\x06\\x00\\x00\\x00\\x00\\x00\\x80-N\\x00\\x00\\x00\\x00\\x00'
         """
-        log.warn('Possible false interpretation')
         bt = struct.pack(b'<H', 0)
         bt += struct.pack(b'<B', self.scale)
         bt += struct.pack(b'<B', 0x80 if self.sign else 0x00)
@@ -198,11 +209,10 @@ class Decimal(object):
         >>> str(Decimal(False, 0, 5123456, 6))
         '5.123456'
         """
-        log.warn('Possible false interpretation')
         value = str(self.high * 2**64 + self.low)
         if self.scale > 0:
-            value = value[:-self.scale] + '.' + value[-self.scale:]
-
+            value = value.zfill(self.scale + 1)
+            value = (value[:-self.scale] + '.' + value[-self.scale:]).rstrip('0').rstrip('.')
         if self.sign:
             value = '-%s' % value
         return value
@@ -215,10 +225,14 @@ class Decimal(object):
         >>> str(Decimal.parse(buf))
         '5.123456'
         """
-        log.warn('Possible false interpretation')
-        fp.read(2)
+        reserved = fp.read(2)
+        if reserved != b'\x00\x00':
+            raise ValueError('Invalid reserved Decimal bits')
         scale = struct.unpack(b'<B', fp.read(1))[0]
-        sign = struct.unpack(b'<B', fp.read(1))[0] & 0x80
+        sign_byte = struct.unpack(b'<B', fp.read(1))[0]
+        if sign_byte not in (0, 0x80):
+            raise ValueError('Invalid Decimal sign bits')
+        sign = bool(sign_byte)
         high = struct.unpack(b'<I', fp.read(4))[0]
         low = struct.unpack(b'<Q', fp.read(8))[0]
 

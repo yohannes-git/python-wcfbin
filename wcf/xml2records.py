@@ -1,352 +1,298 @@
-#!/usr/bin/env python2
-# vim: set ts=4 sw=4 tw=79 fileencoding=utf-8:
+"""XML -> MC-NBFX record tree.
 
-from __future__ import absolute_import
+Ordinary XML supplies *lexical text*, not WCF wire types.  By default every
+text or attribute value is written as a UTF-8 Chars record; optional explicit
+type overrides are keyed by an XML namespace-aware path.
+"""
 
-from builtins import chr
+from __future__ import absolute_import, unicode_literals
 
-from wcf.MyHTMLParser import HTMLParser, interesting_cdata
-try:
-    from htmlentitydefs import name2codepoint
-except ImportError:
-    from html.entities import name2codepoint
-
-import re
 import base64
-import logging
+import decimal
+import io
+import re
+from xml.parsers import expat
 
-log = logging.getLogger(__name__)
-
-from wcf.records import *
 from wcf.dictionary import inverted_dict
+from wcf.records import (
+    Record, ShortElementRecord, ElementRecord, ShortDictionaryElementRecord,
+    DictionaryElementRecord, ShortAttributeRecord, AttributeRecord,
+    ShortDictionaryAttributeRecord, DictionaryAttributeRecord,
+    ShortXmlnsAttributeRecord, XmlnsAttributeRecord,
+    ShortDictionaryXmlnsAttributeRecord, DictionaryXmlnsAttributeRecord,
+    Chars8TextRecord, Chars16TextRecord, Chars32TextRecord,
+    Int8TextRecord, Int16TextRecord, Int32TextRecord, Int64TextRecord,
+    UInt64TextRecord, FloatTextRecord, DoubleTextRecord, DecimalTextRecord,
+    BoolTextRecord, UuidTextRecord, UniqueIdTextRecord,
+    Bytes8TextRecord, Bytes16TextRecord, Bytes32TextRecord, DictionaryTextRecord,
+    CommentRecord,
+    dump_records,
+)
+from wcf.datatypes import Decimal
+from wcf.records import elements, attributes
 
 
-classes = Record.records.values()
-classes = dict([(c.__name__, c) for c in classes])
-#inverted_dict = dict([(n,v) for n,v in inverted_dict.iteritems()])
+_INT_TYPES = {
+    'int8': (Int8TextRecord, -128, 127),
+    'int16': (Int16TextRecord, -(1 << 15), (1 << 15) - 1),
+    'int32': (Int32TextRecord, -(1 << 31), (1 << 31) - 1),
+    'int64': (Int64TextRecord, -(1 << 63), (1 << 63) - 1),
+    'uint64': (UInt64TextRecord, 0, (1 << 64) - 1),
+}
+_XML_NS = 'http://www.w3.org/XML/1998/namespace'
 
 
-int_reg = re.compile(r'^-?[1-9]\d*$')
-uint_reg = re.compile(r'^[1-9]\d*$')
-uuid_reg = re.compile(r'^(([a-fA-F0-9]{8})-(([a-fA-F0-9]{4})-){3}([a-fA-F0-9]{12}))$')
-uniqueid_reg = re.compile(r'^urn:uuid:(([a-fA-F0-9]{8})-(([a-fA-F0-9]{4})-){3}([a-fA-F0-9]{12}))$')
-base64_reg = re.compile(r'^[a-zA-Z0-9/+]*={0,2}$')
-float_reg = re.compile(r'^-?(INF)|(NaN)|(\d+(\.\d+)?)$')
-datetime_reg = re.compile(r'^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d{1,7})?)?(Z|(\+|-\d{2}:\d{2}))')
+def _as_qname(name, ns, is_attribute=False):
+    if ':' in name:
+        prefix, local = name.split(':', 1)
+        if prefix not in ns:
+            raise ValueError('Undeclared XML namespace prefix: %s' % prefix)
+        uri = ns[prefix]
+    else:
+        local = name
+        uri = '' if is_attribute else ns.get('', '')
+    return '{%s}%s' % (uri, local) if uri else local
 
 
-class XMLParser(HTMLParser):
+def _choose_chars_record(data):
+    length = len(data.encode('utf-8'))
+    if length <= 0xff:
+        return Chars8TextRecord(data)
+    if length <= 0xffff:
+        return Chars16TextRecord(data)
+    if length <= 0xffffffff:
+        return Chars32TextRecord(data)
+    raise ValueError('XML text exceeds WCF Chars32Text length')
+
+
+def _choose_bytes_record(value):
+    length = len(value)
+    if length <= 0xff:
+        return Bytes8TextRecord(value)
+    if length <= 0xffff:
+        return Bytes16TextRecord(value)
+    if length <= 0xffffffff:
+        return Bytes32TextRecord(value)
+    raise ValueError('Binary data exceeds WCF Bytes32Text length')
+
+
+def _typed_text(value, kind):
+    """Build a typed record only when the caller knows the expected type."""
+    kind = kind.lower()
+    if kind in ('text', 'string', 'chars'):
+        return _choose_chars_record(value)
+    stripped = value.strip()
+    if kind in _INT_TYPES:
+        record, minval, maxval = _INT_TYPES[kind]
+        if not re.fullmatch(r'[+-]?[0-9]+', stripped):
+            raise ValueError('Invalid %s value %r' % (kind, value))
+        n = int(stripped)
+        if not minval <= n <= maxval:
+            raise ValueError('%s out of range: %r' % (kind, value))
+        return record(n)
+    if kind in ('bool', 'boolean'):
+        if stripped in ('true', '1'):
+            return BoolTextRecord(True)
+        if stripped in ('false', '0'):
+            return BoolTextRecord(False)
+        raise ValueError('Invalid boolean literal %r' % value)
+    if kind in ('float', 'double'):
+        if stripped in ('INF', '+INF'):
+            n = float('inf')
+        elif stripped == '-INF':
+            n = float('-inf')
+        elif stripped == 'NaN':
+            n = float('nan')
+        elif re.fullmatch(r'[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][+-]?\d+)?', stripped):
+            n = float(stripped)
+        else:
+            raise ValueError('Invalid floating-point literal %r' % value)
+        return FloatTextRecord(n) if kind == 'float' else DoubleTextRecord(n)
+    if kind == 'decimal':
+        number = decimal.Decimal(stripped)
+        if not number.is_finite():
+            raise ValueError('Decimal must be finite')
+        sign, digits, exponent = number.as_tuple()
+        scale = max(0, -exponent)
+        coefficient = int(''.join(map(str, digits))) * 10**max(0, exponent)
+        if not (0 <= scale <= 28) or coefficient >= 1 << 96:
+            raise ValueError('Decimal out of 96-bit or scale range')
+        return DecimalTextRecord(Decimal(bool(sign), coefficient >> 64,
+                                         coefficient & ((1 << 64) - 1), scale))
+    if kind == 'uuid':
+        return UuidTextRecord(stripped)
+    if kind == 'uniqueid':
+        return UniqueIdTextRecord(stripped)
+    if kind in ('base64', 'bytes'):
+        # Whitespace is permitted in XML Schema base64 lexical values.
+        clean = ''.join(stripped.split())
+        return _choose_bytes_record(base64.b64decode(clean, validate=True))
+    raise ValueError('Unsupported explicit WCF type %r' % kind)
+
+
+class XMLParser(object):
+    """Strict XML input with namespace-aware optional explicit type mapping.
+
+    Mapping keys use full XML element paths and Clark notation for namespaces.
+    Attribute keys append '/@name'; unqualified attributes have no namespace.
+
+    >>> from wcf.records import print_records
+    >>> r = XMLParser.parse('<s:Envelope xmlns:s="urn:s"><b:Body xmlns:b="urn:b" /></s:Envelope>')
+    >>> print_records(r)
+    <s:Envelope xmlns:s="urn:s"><b:Body xmlns:b="urn:b"></b:Body></s:Envelope>
+    """
+
+    def __init__(self, type_overrides=None, dictionary_text=False):
+        self.type_overrides = type_overrides or {}
+        self.dictionary_text = dictionary_text
+        self.reset()
 
     def reset(self):
-        HTMLParser.reset(self)
         self.records = []
-        self.last_record = Record()
-        self.last_record.childs = self.records
-        self.last_record.parent = None
-        self.data = None
-        self.is_cdata = False
+        self._stack = []
+        self._namespace_stack = [{'xml': _XML_NS}]
+        self._path = []
+        self._data = []
+        self._finalized = False
+        self._parser = expat.ParserCreate()
+        self._parser.StartElementHandler = self._on_start
+        self._parser.EndElementHandler = self._on_end
+        self._parser.CharacterDataHandler = self._on_data
+        self._parser.CommentHandler = self._on_comment
+        self._parser.StartDoctypeDeclHandler = self._on_doctype
+        self._parser.ProcessingInstructionHandler = self._on_pi
+
+    def _resolve_override(self, path):
+        as_tuple = tuple(path)
+        return self.type_overrides.get(as_tuple,
+                                       self.type_overrides.get('/' + '/'.join(path)))
+
+    def _value_record(self, value, path):
+        kind = self._resolve_override(path)
+        if kind is not None:
+            return _typed_text(value, kind)
+        # DictionaryText is still a lexical string, not inferred numeric typing.
+        # In sessionful MC-NBFSE, use strings already shared via a StringTable.
+        if self.dictionary_text and value in inverted_dict:
+            return DictionaryTextRecord(inverted_dict[value])
+        return _choose_chars_record(value)
+
+    def _flush_text(self):
+        if self._data:
+            value = ''.join(self._data)
+            self._data.clear()
+            record = self._value_record(value, self._path)
+            self._stack[-1].childs.append(record)
 
     def _parse_tag(self, tag):
         if ':' in tag:
-            prefix = tag[:tag.find(':')]
-            name = tag[tag.find(':')+1:]
-
-            if len(prefix) == 1:
-                cls_name = 'Element' + prefix.upper() + 'Record'
+            prefix, name = tag.split(':', 1)
+            if len(prefix) == 1 and 'a' <= prefix <= 'z':
                 if name in inverted_dict:
-                    cls_name = 'PrefixDictionary' + cls_name
-                    log.debug('New %s: %s' % (cls_name, name))
-                    return classes[cls_name](inverted_dict[name])
-                else:
-                    cls_name = 'Prefix' + cls_name
-                    log.debug('New %s: %s' % (cls_name, name))
-                    return classes[cls_name](name)
-            else:
-                if name in inverted_dict:
-                    log.debug('New DictionaryElementRecord: %s:%s' % 
-                            (prefix, name))
-                    return DictionaryElementRecord(prefix,
-                            inverted_dict[name])
-                else:
-                    log.debug('New ElementRecord: %s:%s' % (prefix, name))
-                    return ElementRecord(prefix, name)
-        else:
-            if tag in inverted_dict:
-                log.debug('New ShortDictionaryElementRecord: %s' % (tag, ))
-                return ShortDictionaryElementRecord(inverted_dict[tag])
-            else:
-                log.debug('New ShortElementRecord: %s' % (tag, ))
-                return ShortElementRecord(tag)
+                    cls = getattr(elements, 'PrefixDictionaryElement%sRecord' % prefix.upper())
+                    return cls(inverted_dict[name])
+                cls = getattr(elements, 'PrefixElement%sRecord' % prefix.upper())
+                return cls(name)
+            if name in inverted_dict:
+                return DictionaryElementRecord(prefix, inverted_dict[name])
+            return ElementRecord(prefix, name)
+        if tag in inverted_dict:
+            return ShortDictionaryElementRecord(inverted_dict[tag])
+        return ShortElementRecord(tag)
 
-    def _store_data(self, data, end=False, is_cdata=False):
-        textrecord = self._parse_data(data, is_cdata)
-        if isinstance(textrecord, EmptyTextRecord):
-            return
-        log.debug('New %s: %s' % (type(textrecord).__name__, data))
-
-        self.last_record.childs.append(textrecord)
-        #if end:
-        #    textrecord.type += 1
-
-    def _parse_data(self, data, is_cdata=False):
-        if not is_cdata:
-            data = data.strip()
-        b64 = False
-        try:
-            if base64_reg.match(data):
-                base64.b64decode(data)
-                b64 = True
-        except:
-            b64 = False
-        if data == '0':
-            return ZeroTextRecord()
-        elif data == '1':
-            return OneTextRecord()
-        elif data.lower() == 'false':
-            return FalseTextRecord()
-        elif data.lower() == 'true':
-            return TrueTextRecord()
-        elif len(data) > 3 and data[1] == ':' and data[2:] in inverted_dict:
-            return QNameDictionaryTextRecord(data[0], inverted_dict[data[2:]])
-        elif uniqueid_reg.match(data):
-            m = uniqueid_reg.match(data)
-            return UniqueIdTextRecord(m.group(1))
-        elif uuid_reg.match(data):
-            m = uuid_reg.match(data)
-            return UuidTextRecord(m.group(1))
-        elif int_reg.match(data):
-            val = int(data)
-            if -128 <= val < 128:
-                return Int8TextRecord(val)
-            elif -2**16/2 <= val < 2**16/2:
-                return Int16TextRecord(val)
-            elif -2**32/2 <= val < 2**32/2:
-                return Int32TextRecord(val)
-            elif -2**64 <= val < 2**64/2:
-                return Int64TextRecord(val)
-            elif 0 <= val < 2**64:
-                return UInt64TextRecord(val)
-        elif data == '':
-            return EmptyTextRecord()
-        elif b64:
-            data = base64.b64decode(data)
-            val = len(data)
-            if val < 2**8:
-                return Bytes8TextRecord(data)
-            elif val < 2**16:
-                return Bytes16TextRecord(data)
-            elif val < 2**32:
-                return Bytes32TextRecord(data)
-        #elif float_reg.match(data):
-        #    return DoubleTextRecord(float(data))
-        elif data in inverted_dict:
-            return DictionaryTextRecord(inverted_dict[data])
-        elif datetime_reg.match(data) and False:  # TODO
-            t = data.split('Z')
-            tz = 0
-            if len(t) > 1:
-                dt = t[0]
-                tz = 1 if len(tz[1]) else 2
-            dt = t[0]
-            dt = dt.split('.')
-            ns = 0
-            if len(dt) > 1:
-                ns = int(dt[1])
-            dt = dt[0]
-            if len(dt) == 10:
-                dt = datetime.datetime.strptime(dt, "%Y-%m-%d")
-            elif len(dt) == 16:
-                dt = datetime.datetime.strptime(dt, "%Y-%m-%dT%H:%M")
-            else:
-                dt = datetime.datetime.strptime(dt, "%Y-%m-%dT%H:%M:%S")
-
-            base_diff = 62135596800.0
-            dt = int((time.mktime(dt.timetuple()) - base) * 10 + ms)
-
-            return DateTimeTextRecord(dt, tz)
-
-        # text as fallback
-        val = len(data.encode('utf-16le'))
-        if val < 2**8:
-            return UnicodeChars8TextRecord(data)
-        elif val < 2**16:
-            return UnicodeChars16TextRecord(data)
-        elif val < 2**32:
-            return UnicodeChars32TextRecord(data)
-
-    def _parse_attr(self, name, value):
-
-        if ':' in name:
-            prefix = name[:name.find(':')]
-            name   = name[name.find(':')+1:]
-
-            if prefix == 'xmlns':
-                if value in inverted_dict:
-                    return DictionaryXmlnsAttributeRecord(name,
-                            inverted_dict[value])
-                else:
-                    return XmlnsAttributeRecord(name, value)
-            elif len(prefix) == 1:
-                value = self._parse_data(value)
-                cls_name = 'Attribute' + prefix.upper() + 'Record'
-                if name in inverted_dict:
-                    return classes['PrefixDictionary' +
-                            cls_name](inverted_dict[name], value)
-                else:
-                    return classes['Prefix' + cls_name](name, value)
-            else:
-                value = self._parse_data(value)
-                if name in inverted_dict:
-                    return DictionaryAttributeRecord(prefix,
-                            inverted_dict[name], value)
-                else:
-                    return AttributeRecord(prefix, name, value)
-        elif name == 'xmlns':
+    def _parse_attr(self, name, value, ns):
+        if name == 'xmlns':
             if value in inverted_dict:
                 return ShortDictionaryXmlnsAttributeRecord(inverted_dict[value])
-            else:
-                return ShortXmlnsAttributeRecord(value)
+            return ShortXmlnsAttributeRecord(value)
+        if name.startswith('xmlns:'):
+            prefix = name[6:]
+            if value in inverted_dict:
+                return DictionaryXmlnsAttributeRecord(prefix, inverted_dict[value])
+            return XmlnsAttributeRecord(prefix, value)
+
+        record = self._value_record(value, self._path + ['@' + _as_qname(name, ns, True)])
+        if ':' in name:
+            prefix, local = name.split(':', 1)
+            if len(prefix) == 1 and 'a' <= prefix <= 'z':
+                if local in inverted_dict:
+                    cls = getattr(attributes, 'PrefixDictionaryAttribute%sRecord' % prefix.upper())
+                    return cls(inverted_dict[local], record)
+                cls = getattr(attributes, 'PrefixAttribute%sRecord' % prefix.upper())
+                return cls(local, record)
+            if local in inverted_dict:
+                return DictionaryAttributeRecord(prefix, inverted_dict[local], record)
+            return AttributeRecord(prefix, local, record)
+        if name in inverted_dict:
+            return ShortDictionaryAttributeRecord(inverted_dict[name], record)
+        return ShortAttributeRecord(name, record)
+
+    def _on_start(self, tag, attrs):
+        if self._stack:
+            self._flush_text()
+        ns = self._namespace_stack[-1].copy()
+        for name, value in attrs.items():
+            if name == 'xmlns':
+                ns[''] = value
+            elif name.startswith('xmlns:'):
+                ns[name[6:]] = value
+        self._path.append(_as_qname(tag, ns))
+        element = self._parse_tag(tag)
+        for name, value in attrs.items():
+            element.attributes.append(self._parse_attr(name, value, ns))
+        if self._stack:
+            self._stack[-1].childs.append(element)
         else:
-            value = self._parse_data(value)
-            if name in inverted_dict:
-                return ShortDictionaryAttributeRecord(inverted_dict[name], value)
-            else:
-                return ShortAttributeRecord(name, value)
+            self.records.append(element)
+        self._stack.append(element)
+        self._namespace_stack.append(ns)
 
-    def handle_starttag(self, tag, attrs):
-        if self.data:
-            self._store_data(self.data, False)
-            self.data = None
-            self.is_cdata = False
+    def _on_end(self, tag):
+        self._flush_text()
+        self._stack.pop()
+        self._path.pop()
+        self._namespace_stack.pop()
 
-        el = self._parse_tag(tag)
-        for n, v in attrs:
-            el.attributes.append(self._parse_attr(n, v))
-        self.last_record.childs.append(el)
-        el.parent = self.last_record
-        self.last_record = el
+    def _on_data(self, data):
+        self._data.append(data)
 
-    def handle_startendtag(self, tag, attrs):
-        if self.data:
-            self._store_data(self.data, False)
-            self.data = None
-            self.is_cdata = False
-
-        el = self._parse_tag(tag)
-        for n, v in attrs:
-            el.attributes.append(self._parse_attr(n, v))
-        self.last_record.childs.append(el)
-        #self.last_record.childs.append(EndElementRecord())
-
-    def handle_endtag(self, tag):
-        if self.data:
-            self._store_data(self.data, True, self.is_cdata)
-            self.data = None
+    def _on_comment(self, comment):
+        if self._stack:
+            self._flush_text()
+            self._stack[-1].childs.append(CommentRecord(comment))
         else:
-            pass#self.last_record.childs.append(EndElementRecord())
+            self.records.append(CommentRecord(comment))
 
-        self.last_record = self.last_record.parent
+    def _on_doctype(self, *args):
+        raise ValueError('DOCTYPE is not supported in WCF Binary XML conversion')
 
-    def handle_data(self, data):
-        self.is_cdata = self.is_cdata or self.interesting == interesting_cdata
-        if not self.data:
-            self.data = data
-        else:
-            self.data += data
+    def _on_pi(self, target, data):
+        raise ValueError('Processing instructions cannot be represented in MC-NBFX')
 
-    def handle_charref(self, name):
-        if name[0] == 'x':
-            self.handle_data(chr(int(name[1:], 16)))
-        else:
-            self.handle_data(chr(int(name, 10)))
+    def feed(self, data):
+        if self._finalized:
+            raise ValueError('Parser already closed')
+        self._parser.Parse(data, False)
 
-    def handle_entityref(self, name):
-        self.handle_data(self.unescape("&%s;" % name))
-
-    handle_decl = handle_data
-
-    def handle_comment(self, comment):
-        if data:
-            self._store_data(self.data, False)
-            self.data = None
-            self.is_cdata = False
-
-        self.last_record.childs.append(CommentRecord(comment))
-
-    def parse_marked_section(self, i, report=1):
-        try:
-            from markupbase import _markedsectionclose, _msmarkedsectionclose
-        except ImportError:
-            from _markupbase import _markedsectionclose, _msmarkedsectionclose
-
-        rawdata= self.rawdata
-        assert rawdata[i:i+3] == '<![', "unexpected call to parse_marked_section()"
-        sectName, j = self._scan_name( i+3, i )
-        if j < 0:
-            return j
-        if sectName in ("temp", "cdata", "ignore", "include", "rcdata"):
-            # look for standard ]]> ending
-            match= _markedsectionclose.search(rawdata, i+3)
-        elif sectName in ("if", "else", "endif"):
-            # look for MS Office ]> ending
-            match= _msmarkedsectionclose.search(rawdata, i+3)
-        else:
-            self.error('unknown status keyword %r in marked section' % rawdata[i+3:j])
-        if not match:
-            return -1
-        if report:
-            if sectName == "cdata":
-                assert rawdata[j] == '['
-                self.handle_data(rawdata[j+1:match.start(0)])
-            else:
-                j = match.start(0)
-                self.unknown_decl(rawdata[i+3: j])
-        return match.end(0)
+    def close(self):
+        if not self._finalized:
+            self._parser.Parse(b'', True)
+            self._finalized = True
+        return self.records
 
     @classmethod
-    def parse(cls, data):
-        """
-        Parses a XML String/Fileobject into a Record tree
+    def parse(cls, data, type_overrides=None, dictionary_text=False):
+        """Parse XML input from bytes, str, or a file-like object."""
+        if hasattr(data, 'read'):
+            data = data.read()
+        if not isinstance(data, (str, bytes)):
+            raise TypeError('Expected XML text, bytes, or file-like object')
+        p = cls(type_overrides=type_overrides, dictionary_text=dictionary_text)
+        p.feed(data)
+        return p.close()
 
-        :param data: a XML string or fileobject
-        :returns: a Record tree
-
-        >>> from wcf.records import dump_records, print_records
-        >>> from wcf.xml2records import XMLParser
-        >>> r = XMLParser.parse('<s:Envelope><b:Body /></s:Envelope>')
-        >>> dump_records(r)
-        b'V\\x02E\\x0e\\x01\\x01'
-        >>> b = print_records(r)
-        <s:Envelope>
-         <b:Body></b:Body>
-        </s:Envelope>
-        """
-        p = cls()
-        xml = None
-        if isinstance(data, str):
-            xml = data
-        elif hasattr(data, 'read'):
-            xml = data.read()
-        else:
-            raise ValueError("%s has an incompatible type %s" % (data,
-                type(data)))
-
-        p.feed(xml)
-
-        return p.records
 
 if __name__ == '__main__':
     import sys
-
-    fp = sys.stdin
-
-    if len(sys.argv) > 1:
-        fp = open(sys.argv[1], 'r')
-
-    logging.basicConfig(level=logging.INFO)
-
-    p = XMLParser()
-    indata = fp.read()#.strip()
-    fp.close()
-    p.feed(indata)
-    sys.stdout.write(dump_records(p.records))
+    p = XMLParser.parse(sys.stdin.buffer.read())
+    sys.stdout.buffer.write(dump_records(p))

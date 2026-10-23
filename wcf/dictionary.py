@@ -517,3 +517,61 @@ dictionary = {
 }
 
 inverted_dict = dict([(v, k) for (k, v) in dictionary.items()])
+
+# MC-NBFS uses even IDs (the static dictionary); MC-NBFSE reserves odd IDs
+# for a dictionary negotiated incrementally across a session.  Keep the
+# immutable static entries separate from session data.  A scoped mapping
+# avoids leaking strings between connections/threads/coroutines.
+from collections.abc import Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
+
+static_dictionary = dictionary
+static_inverted_dict = inverted_dict
+_session_dictionary = ContextVar('wcf_nbfse_dictionary', default=None)
+
+
+class _SessionDictionaryView(Mapping):
+    def __init__(self, static, reverse=False):
+        self._static = static
+        self._reverse = reverse
+
+    def _dynamic(self):
+        mapping = _session_dictionary.get()
+        if mapping is None:
+            return {}
+        if self._reverse:
+            return {value: index for index, value in mapping.items()}
+        return mapping
+
+    def __getitem__(self, key):
+        # Static IDs take precedence where a string exists in both tables.
+        if key in self._static:
+            return self._static[key]
+        return self._dynamic()[key]
+
+    def __iter__(self):
+        yield from self._static
+        yield from (key for key in self._dynamic() if key not in self._static)
+
+    def __len__(self):
+        return len(self._static) + sum(1 for key in self._dynamic()
+                                       if key not in self._static)
+
+
+@contextmanager
+def dictionary_context(session_entries):
+    """Activate an odd-index MC-NBFSE dictionary for this operation only.
+
+    ``session_entries`` is a mapping of odd integer IDs to Unicode strings.
+    This is intentionally scoped: plain MC-NBFS must not accept session IDs.
+    """
+    token = _session_dictionary.set(dict(session_entries))
+    try:
+        yield
+    finally:
+        _session_dictionary.reset(token)
+
+
+dictionary = _SessionDictionaryView(static_dictionary)
+inverted_dict = _SessionDictionaryView(static_inverted_dict, reverse=True)
