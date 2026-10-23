@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from io import BytesIO
 
 from wcf.errors import WcfBinaryError, binary_errors
-from wcf.datatypes import MultiByteInt31, Utf8String, read_exact
+from wcf.datatypes import MultiByteInt31, Utf8String, read_exact, read_mbi31, read_utf8, mbi31_bytes, utf8_bytes
 from wcf.dictionary import dictionary_context
 from wcf.records import DEFAULT_QUOTAS, Record, dump_records, render_xml
 from wcf.xml2records import XMLParser
@@ -155,13 +155,13 @@ class BinaryXmlSession:
         if len(data) > self._max_document_bytes:
             raise WcfBinaryError('MC-NBFSE document size limit exceeded')
         fp = BytesIO(data)
-        size = MultiByteInt31.parse(fp).value
+        size = read_mbi31(fp)
         if size > self._max_table_bytes:
             raise WcfBinaryError('MC-NBFSE StringTable size limit exceeded')
         table_fp = BytesIO(read_exact(fp, size))
         new_strings = []
         while table_fp.tell() < size:
-            new_strings.append(Utf8String.parse(table_fp).value)
+            new_strings.append(read_utf8(table_fp))
             if len(self._entries) + len(new_strings) > self._max_strings:
                 raise WcfBinaryError('MC-NBFSE session dictionary limit exceeded')
         self._commit(*self._new_entries(new_strings, size), size)

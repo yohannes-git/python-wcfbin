@@ -38,7 +38,7 @@ import struct
 import uuid
 
 from wcf.errors import WcfBinaryError
-from wcf.datatypes import Decimal, MultiByteInt31, read_exact, read_struct
+from wcf.datatypes import Decimal, MultiByteInt31, read_exact, read_struct, read_mbi31, mbi31_bytes
 from wcf.dictionary import dictionary
 from wcf.records.base import Record, Text, charge
 
@@ -418,7 +418,7 @@ class QNameDictionaryTextRecord(Text):
         if prefix_index >= 26:
             raise WcfBinaryError('Invalid QNameDictionaryText prefix index')
         prefix = chr(prefix_index + ord('a'))
-        index = MultiByteInt31.parse(fp).value
+        index = read_mbi31(fp)
         dictionary[index]  # an id unknown when decoding is refused
         return cls(prefix, index)
 
@@ -839,7 +839,7 @@ class DictionaryTextRecord(Text):
         >>> str(DictionaryTextRecord.parse(fp))
         'Envelope'
         """
-        index = MultiByteInt31.parse(fp).value
+        index = read_mbi31(fp)
         dictionary[index]  # an id unknown when decoding is refused
         return cls(index)
 

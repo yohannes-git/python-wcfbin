@@ -28,7 +28,7 @@
 #  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """Attribute records (MC-NBFX 2.2.2)."""
 
-from wcf.datatypes import MultiByteInt31, Utf8String
+from wcf.datatypes import MultiByteInt31, Utf8String, read_mbi31, read_utf8, mbi31_bytes, utf8_bytes
 from wcf.dictionary import dictionary
 from wcf.records.base import (Attribute, Record, _DictionaryName, _NamedRecord,
                               letter_records, read_attribute_text,
@@ -176,9 +176,9 @@ class ShortXmlnsAttributeRecord(Attribute):
 
     @classmethod
     def parse(cls, fp):
-        args = [Utf8String.parse(fp).value] if cls._has_prefix else []
-        args.append(MultiByteInt31.parse(fp).value if cls._by_index
-                    else Utf8String.parse(fp).value)
+        args = [read_utf8(fp)] if cls._has_prefix else []
+        args.append(read_mbi31(fp) if cls._by_index
+                    else read_utf8(fp))
         return cls(*args)
 
 

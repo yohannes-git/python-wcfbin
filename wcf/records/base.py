@@ -33,7 +33,7 @@ import string
 from contextvars import ContextVar
 
 from wcf.errors import WcfBinaryError, binary_errors
-from wcf.datatypes import MultiByteInt31, Utf8String
+from wcf.datatypes import MultiByteInt31, Utf8String, read_mbi31, read_utf8, mbi31_bytes, utf8_bytes
 from wcf.dictionary import dictionary
 from wcf.xmltext import comment, escape_attribute, ncname
 
@@ -370,9 +370,9 @@ class _NamedRecord(Record):
 
     @classmethod
     def _read_names(cls, fp):
-        names = [Utf8String.parse(fp).value] if cls._has_prefix else []
-        names.append(MultiByteInt31.parse(fp).value if cls._by_index
-                     else Utf8String.parse(fp).value)
+        names = [read_utf8(fp)] if cls._has_prefix else []
+        names.append(read_mbi31(fp) if cls._by_index
+                     else read_utf8(fp))
         return names
 
 
@@ -415,7 +415,7 @@ class CommentRecord(Record):
 
     @classmethod
     def parse(cls, fp):
-        return cls(Utf8String.parse(fp).value)
+        return cls(read_utf8(fp))
 
 
 class ArrayRecord(Record):
@@ -503,7 +503,7 @@ class ArrayRecord(Record):
         if octet[0] not in cls.datatypes:
             raise WcfBinaryError('Unsupported ArrayRecord type 0x%02X' % octet[0])
         item_class = Record.records[octet[0] - 1]
-        count = MultiByteInt31.parse(fp).value
+        count = read_mbi31(fp)
         if count == 0:
             raise WcfBinaryError('ArrayRecord length cannot be zero')
         # every item stands for <name attributes>value</name>

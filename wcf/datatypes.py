@@ -37,7 +37,7 @@ import struct
 from wcf.errors import WcfBinaryError
 
 __all__ = ['MultiByteInt31', 'Utf8String', 'Decimal', 'read_exact',
-           'read_struct']
+           'read_struct', 'read_mbi31', 'read_utf8', 'mbi31_bytes', 'utf8_bytes']
 
 
 # above this length, read in chunks of it: MC-NBFX 4, "avoid allocating
@@ -82,6 +82,63 @@ def read_struct(fp, fmt):
     -1
     """
     return struct.unpack(fmt, read_exact(fp, struct.calcsize(fmt)))[0]
+
+
+def read_mbi31(fp):
+    """MultiByteInt31.parse(fp).value, without the object, and a single
+    read for the common one-byte value.
+
+    >>> from io import BytesIO
+    >>> read_mbi31(BytesIO(b'\\xb9\\x0a'))
+    1337
+    """
+    octet = fp.read(1)
+    if not octet:
+        raise WcfBinaryError('Truncated MultiByteInt31')
+    byte = octet[0]
+    if byte < 0x80:
+        return byte
+    value = byte & 0x7F
+    for pos in range(1, 5):
+        octet = fp.read(1)
+        if not octet:
+            raise WcfBinaryError('Truncated MultiByteInt31')
+        byte = octet[0]
+        if pos == 4:
+            if byte & 0xF8:
+                raise WcfBinaryError('Invalid fifth byte in MultiByteInt31')
+            value |= byte << 28
+            if value < (1 << 28):
+                raise WcfBinaryError('Non-canonical MultiByteInt31 length')
+            return value
+        value |= (byte & 0x7F) << (pos * 7)
+        if not byte & 0x80:
+            if value < (1 << (7 * pos)):
+                raise WcfBinaryError('Non-canonical MultiByteInt31 length')
+            return value
+
+
+def read_utf8(fp):
+    """Utf8String.parse(fp).value, without the objects."""
+    return read_exact(fp, read_mbi31(fp)).decode('utf-8')
+
+
+_ONE_BYTE = [bytes((i,)) for i in range(0x80)]
+
+
+def mbi31_bytes(value):
+    """MultiByteInt31(value).to_bytes(), without the object for one byte."""
+    if value.__class__ is int and 0 <= value < 0x80:
+        return _ONE_BYTE[value]
+    return MultiByteInt31(value).to_bytes()
+
+
+def utf8_bytes(value):
+    """Utf8String(value).to_bytes(), without the objects."""
+    data = value.encode('utf-8')
+    if len(data) < 0x80:
+        return _ONE_BYTE[len(data)] + data
+    return MultiByteInt31(len(data)).to_bytes() + data
 
 
 class MultiByteInt31(object):
@@ -134,24 +191,7 @@ class MultiByteInt31(object):
         >>> mb.value
         1337
         """
-        value = 0
-        for pos in range(5):
-            octet = fp.read(1)
-            if len(octet) != 1:
-                raise WcfBinaryError('Truncated MultiByteInt31')
-            byte = octet[0]
-            if pos == 4:
-                if byte & 0xF8:
-                    raise WcfBinaryError('Invalid fifth byte in MultiByteInt31')
-                value |= byte << 28
-                if value < (1 << 28):
-                    raise WcfBinaryError('Non-canonical MultiByteInt31 length')
-                return cls(value)
-            value |= (byte & 0x7F) << (pos * 7)
-            if not byte & 0x80:
-                if pos and value < (1 << (7 * pos)):
-                    raise WcfBinaryError('Non-canonical MultiByteInt31 length')
-                return cls(value)
+        return cls(read_mbi31(fp))
 
 
 
@@ -190,8 +230,7 @@ class Utf8String(object):
         >>> print(str(s))
         über
         """
-        length = MultiByteInt31.parse(fp).value
-        return cls(read_exact(fp, length).decode('utf-8'))
+        return cls(read_utf8(fp))
 
 
 class Decimal(object):
