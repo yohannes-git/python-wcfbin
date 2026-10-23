@@ -215,6 +215,7 @@ class ShortDictionaryXmlnsAttributeRecord(Attribute):
         >>> ShortDictionaryXmlnsAttributeRecord(6).to_bytes()
         b'\\n\\x06'
         """
+        dictionary[self.index]  # never write an id unknown to the peer
         bt = struct.pack(b'<B', self.type)
         bt += MultiByteInt31(self.index).to_bytes()
 
@@ -250,6 +251,7 @@ class DictionaryXmlnsAttributeRecord(Attribute):
         >>> DictionaryXmlnsAttributeRecord('a', 6).to_bytes()
         b'\\x0b\\x01\x61\\x06'
         """
+        dictionary[self.index]  # never write an id unknown to the peer
         bt = struct.pack(b'<B', self.type)
         bt += Utf8String(validate_xml_name(self.prefix, 'xmlns prefix')).to_bytes()
         bt += MultiByteInt31(self.index).to_bytes()

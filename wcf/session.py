@@ -9,12 +9,13 @@ Use a separate :class:`BinaryXmlSession` for each connection/direction. Both
 sides of a duplex exchange maintain their own dictionaries and lifetimes.
 """
 
+from collections import ChainMap
 from contextlib import contextmanager
 from io import BytesIO
 
 from wcf.datatypes import MultiByteInt31, Utf8String
-from wcf.dictionary import dictionary_context, static_inverted_dict
-from wcf.records import Record, dump_records, render_xml
+from wcf.dictionary import dictionary_context
+from wcf.records import DEFAULT_QUOTAS, Record, dump_records, render_xml
 from wcf.xml2records import XMLParser
 
 
@@ -26,14 +27,24 @@ class SessionDocument:
     dictionary IDs even after the decoding session processes more messages.
     """
 
-    def __init__(self, records, new_strings, dictionary_snapshot):
+    def __init__(self, records, new_strings, entries, reverse=None):
         self.records = records
         self.new_strings = tuple(new_strings)
-        self.dictionary = dict(dictionary_snapshot)
+        # The session dictionary only grows (and reset() replaces it), so
+        # the session's own mapping resolves the IDs of this document for
+        # as long as it lives: no copy per document.
+        self._entries = entries
+        self._reverse = reverse
+
+    @property
+    def dictionary(self):
+        """Copy of the session entries known when the document was parsed
+        (and possibly some added later, with higher IDs)."""
+        return dict(self._entries)
 
     @contextmanager
     def context(self):
-        with dictionary_context(self.dictionary):
+        with dictionary_context(self._entries, self._reverse):
             yield
 
     def render_xml(self):
@@ -64,16 +75,23 @@ class BinaryXmlSession:
     StringTable). Use ``encode_xml`` with ``new_strings`` to add new dictionary
     entries and start reusing them in the document and subsequent documents.
 
+    MC-NBFSE section 4 asks consumers to limit the StringTables they accept:
+    ``max_table_bytes`` bounds one StringTable, ``max_strings`` and
+    ``max_session_bytes`` the whole session dictionary. ``quotas`` are the
+    decoding quotas of each document (see wcf.records.Quotas).
+
     Note: MC-NMF framing and negotiation (encoding 0x08) are separate.
     """
 
     def __init__(self, max_table_bytes=1024 * 1024, max_strings=65536,
-                 max_document_bytes=16 * 1024 * 1024):
-        self._entries = {}
-        self._value_to_id = {}
+                 max_document_bytes=16 * 1024 * 1024,
+                 max_session_bytes=4 * 1024 * 1024, quotas=DEFAULT_QUOTAS):
         self._max_table_bytes = max_table_bytes
         self._max_strings = max_strings
         self._max_document_bytes = max_document_bytes
+        self._max_session_bytes = max_session_bytes
+        self.quotas = quotas
+        self.reset()
 
     @property
     def dictionary(self):
@@ -81,34 +99,51 @@ class BinaryXmlSession:
         return self._entries.copy()
 
     def reset(self):
-        """Reset at the end of an MC-NMF session; never retain across peers."""
-        self._entries.clear()
-        self._value_to_id.clear()
+        """Reset at the end of an MC-NMF session; never retain across peers.
+
+        New mappings replace the old ones, which the documents already
+        decoded keep using.
+        """
+        self._entries = {}
+        self._value_to_id = {}
+        self._session_bytes = 0
 
     @contextmanager
     def context(self):
         """Activate dictionary resolution for inspecting/manipulating trees."""
-        with dictionary_context(self._entries):
+        with dictionary_context(self._entries, self._value_to_id):
             yield
 
-    def _accept_strings(self, strings):
+    def _new_entries(self, strings, table_bytes):
+        """The (id -> string, string -> id) mappings of new strings, checked
+        against MC-NBFSE 2.1 and the session limits; nothing is committed."""
         if len(self._entries) + len(strings) > self._max_strings:
             raise ValueError('MC-NBFSE session dictionary limit exceeded')
-        known = set(self._value_to_id)
+        if self._session_bytes + table_bytes > self._max_session_bytes:
+            raise ValueError('MC-NBFSE session dictionary size limit exceeded')
+        entries, reverse = {}, {}
+        next_id = 2 * len(self._entries) + 1
         for string in strings:
             if not isinstance(string, str):
                 raise TypeError('MC-NBFSE strings must be Unicode')
-            if string in known:
-                raise ValueError('Duplicate MC-NBFSE session string: %r' % string)
-            known.add(string)
-        updated = self._entries.copy()
-        next_id = 2 * len(updated) + 1
-        for string in strings:
-            updated[next_id] = string
+            # "Each String MUST be unique and MUST NOT have been present in
+            # a prior StringTable."
+            if string in self._value_to_id or string in reverse:
+                raise ValueError('Duplicate MC-NBFSE session string: %.64r' % string)
+            entries[next_id] = string
+            reverse[string] = next_id
             next_id += 2
-        return updated
+        return entries, reverse
 
-    def parse_document(self, data):
+    def _commit(self, entries, reverse, table_bytes):
+        self._entries.update(entries)
+        self._value_to_id.update(reverse)
+        self._session_bytes += table_bytes
+
+    def parse_document(self, data, quotas=None):
+        """Decode one MC-NBFSE document: its StringTable, then the records,
+        under ``quotas`` (the session's unless given). The session
+        dictionary is only extended once the whole document is valid."""
         if len(data) > self._max_document_bytes:
             raise ValueError('MC-NBFSE document size limit exceeded')
         fp = BytesIO(data)
@@ -126,33 +161,32 @@ class BinaryXmlSession:
                 raise ValueError('MC-NBFSE session dictionary limit exceeded')
         if table_fp.tell() != size:
             raise ValueError('MC-NBFSE StringTable does not match declared size')
-        updated = self._accept_strings(new_strings)
-        with dictionary_context(updated):
-            records = Record.parse(fp)
-            # Force dictionary lookups on all attributes/text to catch unknown
-            # IDs, instead of deferring errors until after session commit.
-            render_xml(records)
-        # Commit only after validating the *entire* document.
-        self._entries = updated
-        self._value_to_id = {value: key for key, value in updated.items()}
-        return SessionDocument(records, new_strings, updated)
+        entries, reverse = self._new_entries(new_strings, size)
+        # Record.parse() resolves every dictionary reference, so a document
+        # referring to an unknown ID is refused before anything is committed.
+        with dictionary_context(ChainMap(entries, self._entries),
+                                ChainMap(reverse, self._value_to_id)):
+            records = Record.parse(fp, self.quotas if quotas is None else quotas)
+        self._commit(entries, reverse, size)
+        return SessionDocument(records, new_strings, self._entries,
+                               self._value_to_id)
 
     def encode_records(self, records, new_strings=()):
         """Encode typed records, preserving their NBFX record types."""
         new_strings = tuple(new_strings)
-        updated = self._accept_strings(new_strings)
         header = encode_string_table(new_strings)
         table_size = sum(len(Utf8String(item).to_bytes()) for item in new_strings)
         if table_size > self._max_table_bytes:
             raise ValueError('MC-NBFSE StringTable size limit exceeded')
-        with dictionary_context(updated):
-            # Ensure no unresolved odd IDs are serialized by accident.
-            render_xml(records)
+        entries, reverse = self._new_entries(new_strings, table_size)
+        # serializing resolves every dictionary reference: an ID unknown
+        # to the peer cannot be written
+        with dictionary_context(ChainMap(entries, self._entries),
+                                ChainMap(reverse, self._value_to_id)):
             data = header + dump_records(records)
         if len(data) > self._max_document_bytes:
             raise ValueError('MC-NBFSE document size limit exceeded')
-        self._entries = updated
-        self._value_to_id = {value: key for key, value in updated.items()}
+        self._commit(entries, reverse, table_size)
         return data
 
     def encode_xml(self, xml, new_strings=(), type_overrides=None):
@@ -162,8 +196,9 @@ class BinaryXmlSession:
         URIs or values. Previously registered strings are reused automatically.
         """
         new_strings = tuple(new_strings)
-        updated = self._accept_strings(new_strings)
-        with dictionary_context(updated):
+        entries, reverse = self._new_entries(new_strings, 0)
+        with dictionary_context(ChainMap(entries, self._entries),
+                                ChainMap(reverse, self._value_to_id)):
             records = XMLParser.parse(xml, type_overrides=type_overrides,
                                       dictionary_text=True)
         return self.encode_records(records, new_strings=new_strings)

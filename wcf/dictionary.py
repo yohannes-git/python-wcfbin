@@ -540,18 +540,34 @@ class UnknownDictionaryId(KeyError, ValueError):
     """
 
 
+class _SessionMaps(object):
+    """The active session dictionary, both ways. The string to id map is
+    built on first use only, once per context, and not on every lookup."""
+
+    __slots__ = ('forward', '_reverse')
+
+    def __init__(self, forward, reverse=None):
+        self.forward = forward
+        self._reverse = reverse
+
+    @property
+    def reverse(self):
+        if self._reverse is None:
+            self._reverse = {value: index for index, value in self.forward.items()}
+        return self._reverse
+
+
+_NO_SESSION = _SessionMaps({}, {})
+
+
 class _SessionDictionaryView(Mapping):
     def __init__(self, static, reverse=False):
         self._static = static
         self._reverse = reverse
 
     def _dynamic(self):
-        mapping = _session_dictionary.get()
-        if mapping is None:
-            return {}
-        if self._reverse:
-            return {value: index for index, value in mapping.items()}
-        return mapping
+        maps = _session_dictionary.get() or _NO_SESSION
+        return maps.reverse if self._reverse else maps.forward
 
     def __getitem__(self, key):
         # Static IDs take precedence where a string exists in both tables.
@@ -572,13 +588,16 @@ class _SessionDictionaryView(Mapping):
 
 
 @contextmanager
-def dictionary_context(session_entries):
+def dictionary_context(session_entries, reverse=None):
     """Activate an odd-index MC-NBFSE dictionary for this operation only.
 
-    ``session_entries`` is a mapping of odd integer IDs to Unicode strings.
+    ``session_entries`` is a mapping of odd integer IDs to Unicode strings,
+    ``reverse`` the matching string to ID mapping when the caller already
+    maintains one. Neither is copied: they must not change while the
+    context is active.
     This is intentionally scoped: plain MC-NBFS must not accept session IDs.
     """
-    token = _session_dictionary.set(dict(session_entries))
+    token = _session_dictionary.set(_SessionMaps(session_entries, reverse))
     try:
         yield
     finally:

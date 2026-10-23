@@ -393,6 +393,7 @@ class QNameDictionaryTextRecord(Text):
         """
         if len(self.prefix) != 1 or not 'a' <= self.prefix <= 'z':
             raise ValueError('QNameDictionaryText prefix must be a-z')
+        dictionary[self.index]  # never write an id unknown to the peer
         bt = struct.pack(b'<B', self.type)
         bt += struct.pack(b'<B', ord(self.prefix) - ord('a'))
         bt += MultiByteInt31(self.index).to_bytes()
@@ -986,6 +987,7 @@ class DictionaryTextRecord(Text):
         >>> DictionaryTextRecord(2).to_bytes()
         b'\xaa\x02'
         """
+        dictionary[self.index]  # never write an id unknown to the peer
         return bytes(super(DictionaryTextRecord, self).to_bytes() +
                      MultiByteInt31(self.index).to_bytes())
 

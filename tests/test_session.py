@@ -168,5 +168,65 @@ class NbfseTests(unittest.TestCase):
         ET.fromstring(document.render_xml())
 
 
+class NbfseSessionStateTests(unittest.TestCase):
+
+    def test_cumulative_session_size(self):
+        # MC-NBFSE section 4: the whole session dictionary is bounded,
+        # not only each StringTable
+        s = BinaryXmlSession(max_table_bytes=100, max_session_bytes=250)
+        for i in range(2):
+            s.parse_document(encode_string_table(['%d' % i + 'x' * 98]) + b'\x42\x01\x01')
+        with self.assertRaisesRegex(ValueError, 'session dictionary size'):
+            s.parse_document(encode_string_table(['y' * 99]) + b'\x42\x01\x01')
+        self.assertEqual(2, len(s.dictionary))
+        s.reset()
+        s.parse_document(encode_string_table(['y' * 99]) + b'\x42\x01\x01')
+
+    def test_documents_keep_their_ids_across_later_documents_and_reset(self):
+        s = BinaryXmlSession()
+        first = s.parse_document(encode_string_table(['alpha']) + b'\x42\x01\x01')
+        second = s.parse_document(encode_string_table(['beta']) + b'\x42\x03\x42\x01\x01\x01')
+        s.reset()
+        third = s.parse_document(encode_string_table(['gamma']) + b'\x42\x01\x01')
+        self.assertEqual('<alpha></alpha>', first.render_xml())
+        self.assertEqual('<beta><alpha></alpha></beta>', second.render_xml())
+        self.assertEqual('<gamma></gamma>', third.render_xml())
+
+    def test_document_quotas(self):
+        s = BinaryXmlSession()
+        wire = (encode_string_table(['x' * 60000]) + b'\x40\x01a' +
+                b'\xaa\x01' * 300 + b'\x01')
+        with self.assertRaisesRegex(ValueError, 'characters'):
+            s.parse_document(wire)
+        self.assertEqual({}, s.dictionary)  # nothing committed
+        from wcf.records import Quotas
+        doc = s.parse_document(wire, Quotas(max_chars=None))
+        self.assertEqual(18000007, len(doc.render_xml()))
+
+    def test_unknown_id_is_not_encoded(self):
+        from wcf.records.text import DictionaryTextRecord, QNameDictionaryTextRecord
+        from wcf.records import ShortElementRecord
+        for text in (DictionaryTextRecord(1), QNameDictionaryTextRecord('a', 1)):
+            root = ShortElementRecord('a')
+            root.childs.append(text)
+            with self.subTest(text=text), self.assertRaises(ValueError):
+                BinaryXmlSession().encode_records([root])
+
+    def test_long_session_stays_linear(self):
+        # neither the session dictionary nor its reverse mapping is copied
+        # or rebuilt per document or per lookup
+        import time
+        strings = ['s%d' % i for i in range(20000)]
+        sender, receiver = BinaryXmlSession(), BinaryXmlSession()
+        receiver.parse_document(sender.encode_xml('<s0></s0>', new_strings=strings))
+        xml = '<s1>' + ''.join('<s%d>s%d</s%d>' % (i, i + 1, i)
+                               for i in range(2, 200)) + '</s1>'
+        start = time.monotonic()
+        for _ in range(200):
+            doc = receiver.parse_document(sender.encode_xml(xml))
+        self.assertEqual(xml, doc.render_xml())
+        self.assertLess(time.monotonic() - start, 10)
+
+
 if __name__ == '__main__':
     unittest.main()
