@@ -14,7 +14,7 @@ from xml.parsers import expat
 
 from wcf.errors import WcfBinaryError, binary_errors
 from wcf.dictionary import inverted_dict
-from wcf.xmltext import ncname
+from wcf.xmltext import XML_WHITESPACE, ncname
 from wcf.records import (
     ShortElementRecord, ElementRecord, ShortDictionaryElementRecord,
     DictionaryElementRecord, ShortAttributeRecord, AttributeRecord,
@@ -110,12 +110,15 @@ def _choose_bytes_record(value):
                              Bytes32TextRecord), value, len(value))
 
 
+_UUID = re.compile('[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}')
+
+
 def _typed_text(value, kind):
     """Build a typed record only when the caller knows the expected type."""
     kind = kind.lower()
     if kind in ('text', 'string', 'chars'):
         return _choose_chars_record(value)
-    stripped = value.strip()
+    stripped = value.strip(XML_WHITESPACE)
     if kind in _INT_TYPES:
         record, minval, maxval = _INT_TYPES[kind]
         if not re.fullmatch(r'[+-]?[0-9]+', stripped):
@@ -137,7 +140,8 @@ def _typed_text(value, kind):
             n = float('-inf')
         elif stripped == 'NaN':
             n = float('nan')
-        elif re.fullmatch(r'[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][+-]?\d+)?', stripped):
+        elif re.fullmatch(r'[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[Ee][+-]?[0-9]+)?',
+                          stripped):
             n = float(stripped)
             # a finite literal beyond the range is refused, not made INF
             # (a float rounds to float32, as .NET's float.MaxValue written
@@ -153,13 +157,17 @@ def _typed_text(value, kind):
         return FloatTextRecord(n) if kind == 'float' else DoubleTextRecord(n)
     if kind == 'decimal':
         return DecimalTextRecord(Decimal.from_string(stripped))
-    if kind == 'uuid':
-        return UuidTextRecord(stripped)
-    if kind == 'uniqueid':
-        return UniqueIdTextRecord(stripped)
+    if kind in ('uuid', 'uniqueid'):
+        # the text that the record renders; uuid.UUID() would also take
+        # braces, no hyphens, "+", "_" or "0x" in a group, other scripts
+        prefix = 'urn:uuid:' if kind == 'uniqueid' else ''
+        if not stripped.startswith(prefix) or \
+                not _UUID.fullmatch(stripped[len(prefix):]):
+            raise WcfBinaryError('Invalid %s value %r' % (kind, value))
+        return (UuidTextRecord if kind == 'uuid' else UniqueIdTextRecord)(stripped)
     if kind in ('base64', 'bytes'):
         # Whitespace is permitted in XML Schema base64 lexical values.
-        clean = ''.join(stripped.split())
+        clean = re.sub('[%s]' % XML_WHITESPACE, '', stripped)
         return _choose_bytes_record(base64.b64decode(clean, validate=True))
     raise WcfBinaryError('Unsupported explicit WCF type %r' % kind)
 

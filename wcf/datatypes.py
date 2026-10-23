@@ -35,6 +35,7 @@ import re
 import struct
 
 from wcf.errors import WcfBinaryError
+from wcf.xmltext import XML_WHITESPACE
 
 __all__ = ['MultiByteInt31', 'Utf8String', 'Decimal', 'read_exact',
            'read_struct', 'read_mbi31', 'read_utf8', 'mbi31_bytes', 'utf8_bytes']
@@ -265,7 +266,7 @@ class Decimal(object):
         ...
         wcf.errors.WcfBinaryError: Invalid decimal '1E+999999999'
         """
-        match = cls._LEXICAL.fullmatch(text.strip())
+        match = cls._LEXICAL.fullmatch(text.strip(XML_WHITESPACE))
         if match is None or not (match.group(2) or match.group(3)):
             raise WcfBinaryError('Invalid decimal %r' % (text,))
         sign, integer, fraction = match.group(1), match.group(2), match.group(3) or ''

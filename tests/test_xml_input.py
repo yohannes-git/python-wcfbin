@@ -58,6 +58,41 @@ class XmlInputTests(unittest.TestCase):
             with self.subTest(xml=xml), self.assertRaises(ValueError):
                 XMLParser.parse(xml)
 
+    def test_typed_literals_are_xml_schema_literals(self):
+        # only XML whitespace around a value, only ASCII digits, as .NET's
+        # XmlConvert: Unicode spaces and digits of other scripts are refused
+        uuid = '33221100-5544-7766-8899-aabbccddeeff'
+        for kind, text in (('double', '\u0661\u0662'), ('int32', '\u0661'),
+                           ('int32', '12\u3000'), ('int32', '\xa012'),
+                           ('decimal', '1\u3000'), ('bool', 'true\u2003'),
+                           ('base64', 'AA\u3000AA'),
+                           ('uuid', '\u0663' + uuid[1:]),
+                           ('uniqueid', 'urn:uuid:\u0663' + uuid[1:])):
+            with self.subTest(kind=kind, text=text), self.assertRaises(ValueError):
+                XMLParser.parse('<v>%s</v>' % text, type_overrides={'/v': kind})
+        for kind, text, value in (('int32', ' \t12\n', 12), ('double', ' 1.5 ', 1.5),
+                                  ('bool', ' true ', True),
+                                  ('base64', ' AA\tA\nA ', b'\x00\x00\x00')):
+            with self.subTest(kind=kind, text=text):
+                records = XMLParser.parse('<v>%s</v>' % text, type_overrides={'/v': kind})
+                self.assertEqual(value, records[0].childs[0].value)
+        records = XMLParser.parse('<v> %s </v>' % uuid, type_overrides={'/v': 'uuid'})
+        self.assertEqual(uuid, str(records[0].childs[0]))
+        records = XMLParser.parse('<v>urn:uuid:%s</v>' % uuid.upper(),
+                                  type_overrides={'/v': 'uniqueid'})
+        self.assertEqual('urn:uuid:' + uuid, str(records[0].childs[0]))
+
+    def test_uuid_literals(self):
+        # what uuid.UUID() takes but the records would not render
+        uuid = '33221100-5544-7766-8899-aabbccddeeff'
+        for kind, text in (('uuid', '3322110_' + uuid[8:]), ('uuid', '+3221100' + uuid[8:]),
+                           ('uuid', '0x221100' + uuid[8:]), ('uuid', '{%s}' % uuid),
+                           ('uuid', uuid.replace('-', '')), ('uuid', 'urn:uuid:' + uuid),
+                           ('uuid', '3322-1100-5544-7766-8899aabbccddeeff'),
+                           ('uniqueid', uuid), ('uniqueid', 'urn:uuid:{%s}' % uuid)):
+            with self.subTest(kind=kind, text=text), self.assertRaises(ValueError):
+                XMLParser.parse('<v>%s</v>' % text, type_overrides={'/v': kind})
+
     def test_decimal_type(self):
         types = {'/d': 'decimal'}
         for text, scale, rendered in (('1.50', 2, '1.50'), ('-.5', 1, '-0.5'),

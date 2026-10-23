@@ -14,10 +14,14 @@ XML parser (this library's XMLParser included) refuses it.
 import functools
 import re
 
-__all__ = ['ncname', 'escape_text', 'escape_attribute', 'comment']
+__all__ = ['XML_WHITESPACE', 'ncname', 'escape_text', 'escape_attribute',
+           'comment']
 
 from wcf.errors import WcfBinaryError
 
+# XML 1.0 production S: the only whitespace around an XML Schema lexical
+# value (str.strip() and str.split() also take the Unicode spaces)
+XML_WHITESPACE = ' \t\r\n'
 # XML 1.0 (fifth edition) NCName: a Name without ':'
 _NAME_START = ('A-Z_a-z\xc0-\xd6\xd8-\xf6\xf8-\u02ff\u0370-\u037d'
                '\u037f-\u1fff\u200c\u200d\u2070-\u218f\u2c00-\u2fef'
