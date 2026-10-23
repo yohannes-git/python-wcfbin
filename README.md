@@ -72,6 +72,9 @@ instead of silently downgrading to text.
   terminated by `EndElement` or a `*WithEndElement` marker. `dump_records(...)`
   does not mutate records. This supports lossless binary record round-trips for
   implemented record types; changing data may of course change the bytes.
+  One exception: a float32 signaling NaN (FloatText, or a float Array item)
+  comes back as a quiet NaN with the same payload, as Python converts a
+  float32 to a double to hold it.
 * `render_xml(...)` is an XML **textual** representation, not a persistent
   typed intermediate representation. Exporting only the XML and converting it
   back to binary cannot reconstruct original WCF record types. Keep the record
