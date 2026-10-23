@@ -9,9 +9,10 @@ conformity, security, code quality and performance.
 
 Behaviour changes:
 
-* XML to binary writes values as text (`Chars*Text`, or `DictionaryText`
-  for a string of the active dictionaries); typed records only through an
-  explicit type map (`8.0` is no longer re-typed as a double).
+* XML to binary writes values as text (`Chars*Text`; `BinaryXmlSession`
+  writes a string of its dictionaries as a `DictionaryText`); typed records
+  only through an explicit type map (`8.0` is no longer re-typed as a
+  double).
 * `str()` of the text records is the characters they represent, unescaped;
   `render_xml()` escapes (MC-NBFX 2.2.3.13.1) and refuses names and comments
   that XML cannot carry.
