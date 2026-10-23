@@ -240,7 +240,7 @@ class Decimal(object):
     # the xsd:decimal lexical space: no exponent
     _LEXICAL = re.compile(r'([+-]?)([0-9]*)(?:\.([0-9]*))?')
 
-    def __init__(self, sign, high, low, scale):
+    def __init__(self, sign, high, low, scale, reserved=0):
         if not 0 <= scale <= 28:
             raise WcfBinaryError('scale %d isn\'t between 0 and 28' % scale)
         if not (0 <= high < 1 << 32 and 0 <= low < 1 << 64):
@@ -249,6 +249,9 @@ class Decimal(object):
         self.high = high
         self.low = low
         self.scale = scale
+        # wReserved: ignored ([MS-OAUT] 2.2.26), kept so that a decoded
+        # value is written back as it was read
+        self.reserved = reserved
 
     @classmethod
     def from_string(cls, text):
@@ -283,7 +286,7 @@ class Decimal(object):
         >>> Decimal(False, 0, 5123456, 6).to_bytes()
         b'\\x00\\x00\\x06\\x00\\x00\\x00\\x00\\x00\\x80-N\\x00\\x00\\x00\\x00\\x00'
         """
-        return struct.pack('<HBBIQ', 0, self.scale, 0x80 if self.sign else 0,
+        return struct.pack('<HBBIQ', self.reserved, self.scale, 0x80 if self.sign else 0,
                            self.high, self.low)
 
     def __str__(self):
@@ -325,10 +328,10 @@ class Decimal(object):
         """
         # wReserved "MUST be set to 0 and MUST be ignored by the
         # recipient" ([MS-OAUT] 2.2.26)
-        _, scale, sign, high, low = struct.unpack('<HBBIQ', read_exact(fp, 16))
+        reserved, scale, sign, high, low = struct.unpack('<HBBIQ', read_exact(fp, 16))
         if sign not in (0, 0x80):
             raise WcfBinaryError('Invalid Decimal sign bits')
-        return cls(bool(sign), high, low, scale)
+        return cls(bool(sign), high, low, scale, reserved)
 
 
 if __name__ == '__main__':

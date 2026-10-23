@@ -10,7 +10,7 @@ import struct
 import unittest
 
 from wcf.dictionary import dictionary_context
-from wcf.records import Record, render_xml
+from wcf.records import Record, dump_records, render_xml
 from wcf.records.attributes import (
     AttributeRecord, DictionaryAttributeRecord, DictionaryXmlnsAttributeRecord,
     PrefixAttributeARecord, PrefixDictionaryAttributeARecord, ShortAttributeRecord,
@@ -85,8 +85,11 @@ class TextRepresentations(unittest.TestCase):
 
     def test_decimal_reserved_bits_are_ignored(self):
         # [MS-OAUT] 2.2.26: wReserved "MUST be ignored by the recipient"
-        self.assertEqual('<a>1.50</a>', render_xml(decode(bytes.fromhex(
-            '40 01 61 94 01 00 02 00 00 00 00 00 96 00 00 00 00 00 00 00 01'))))
+        wire = bytes.fromhex(
+            '40 01 61 94 01 00 02 00 00 00 00 00 96 00 00 00 00 00 00 00 01')
+        self.assertEqual('<a>1.50</a>', render_xml(decode(wire)))
+        # ignored, but written back as read
+        self.assertEqual(wire, dump_records(decode(wire)))
         for wire in ('40 01 61 94 00 00 1d 00' + ' 00' * 12 + ' 01',  # scale 29
                      '40 01 61 94 00 00 00 01' + ' 00' * 12 + ' 01'):  # sign 1
             with self.subTest(wire=wire), self.assertRaises(ValueError):

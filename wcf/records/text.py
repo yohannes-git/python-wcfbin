@@ -121,8 +121,13 @@ class _FixedSizeText(Text):
     """A text record holding one fixed-size little-endian value
     (``_format``), rendered with str() unless the class says otherwise."""
     _format = None
+    _value_types = (int,)  # bool excluded
 
     def __init__(self, value):
+        if value.__class__ is bool or not isinstance(value, self._value_types):
+            raise TypeError('%s value must be %s, not %s' % (
+                type(self).__name__, ' or '.join(t.__name__ for t in self._value_types),
+                type(value).__name__))
         self.value = value
 
     def to_bytes(self):
@@ -281,6 +286,9 @@ class BoolTextRecord(Text):
     max_chars = 5
 
     def __init__(self, value):
+        if value.__class__ is not bool:
+            raise TypeError('BoolTextRecord value must be bool, not %s'
+                            % type(value).__name__)
         self.value = value
 
     def to_bytes(self):
@@ -429,6 +437,7 @@ class FloatTextRecord(_FixedSizeText):
     type = 0x90
     max_chars = 15
     _format = '<f'
+    _value_types = (int, float)
 
     def __str__(self):
         """
@@ -448,6 +457,7 @@ class DoubleTextRecord(_FixedSizeText):
     type = 0x92
     max_chars = 24
     _format = '<d'
+    _value_types = (int, float)
 
     def __str__(self):
         """
@@ -464,6 +474,9 @@ class DecimalTextRecord(Text):
     max_chars = 31
 
     def __init__(self, value):
+        if not isinstance(value, Decimal):
+            raise TypeError('DecimalTextRecord value must be a wcf.datatypes.Decimal, '
+                            'not %s' % type(value).__name__)
         self.value = value
 
     def __str__(self):
@@ -527,6 +540,10 @@ class DatetimeTextRecord(Text):
     max_chars = 33
 
     def __init__(self, value, tz):
+        for name, field in (('value', value), ('tz', tz)):
+            if field.__class__ is not int:
+                raise TypeError('DatetimeTextRecord %s must be int, not %s'
+                                % (name, type(field).__name__))
         self.value = value
         self.tz = tz
 

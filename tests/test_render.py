@@ -64,25 +64,30 @@ class RenderInjectionTests(unittest.TestCase):
 
 class RenderEscapingTests(unittest.TestCase):
 
-    def test_hand_made_records_are_escaped_or_refused(self):
-        # records built by a program, with values of an unexpected type:
-        # never written as markup
+    def test_hand_made_records_are_refused_or_escaped(self):
+        from wcf.datatypes import Decimal
         from wcf.records import (Int32TextRecord, UInt64TextRecord,
                                  DecimalTextRecord, DoubleTextRecord,
-                                 DatetimeTextRecord, TimeSpanTextRecord)
-        for record in (Int32TextRecord('<x/>'), UInt64TextRecord('<x/>'),
-                       DecimalTextRecord('<x/>')):
-            element = ShortElementRecord('a')
-            element.childs.append(record)
-            self.assertEqual('<a>&lt;x/&gt;</a>', render_xml([element]))
-        for record in (DoubleTextRecord('<x/>'), DatetimeTextRecord('<x/>', 0),
-                       TimeSpanTextRecord('<x/>')):
-            element = ShortElementRecord('a')
-            element.childs.append(record)
-            with self.subTest(record=type(record).__name__):
-                with self.assertRaises((ValueError, TypeError, struct.error)):
-                    render_xml([element])
+                                 DatetimeTextRecord, TimeSpanTextRecord,
+                                 BoolTextRecord)
+        # a value of the wrong type is refused when the record is built
+        for make in (lambda: Int32TextRecord('<x/>'), lambda: Int32TextRecord(True),
+                     lambda: UInt64TextRecord('<x/>'), lambda: DoubleTextRecord('1'),
+                     lambda: DecimalTextRecord('<x/>'), lambda: BoolTextRecord(1),
+                     lambda: DatetimeTextRecord('<x/>', 0),
+                     lambda: TimeSpanTextRecord('<x/>')):
+            with self.assertRaises(TypeError):
+                make()
+        self.assertEqual('1.5', str(DecimalTextRecord(Decimal(False, 0, 15, 1))))
 
+        # a subclass may write anything: it is escaped (the fast path of
+        # render_xml() only applies to the exact classes)
+        class Markup(Int32TextRecord):
+            def __str__(self):
+                return '<x/>'
+        element = ShortElementRecord('a')
+        element.childs.append(Markup(1))
+        self.assertEqual('<a>&lt;x/&gt;</a>', render_xml([element]))
 
     def test_microsoft_character_escaping_example(self):
         # MC-NBFX 2.2.3.13.1: { 0x22, 0x26, 0x3C, 0x3E, 0x27, 0x00 }
