@@ -1,7 +1,6 @@
 #!/usr/bin/env python2
 # vim: set ts=4 sw=4 tw=79 fileencoding=utf-8:
 
-from __future__ import absolute_import
 import logging
 import doctest
 import unittest

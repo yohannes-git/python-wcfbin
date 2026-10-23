@@ -5,7 +5,6 @@ text or attribute value is written as a UTF-8 Chars record; optional explicit
 type overrides are keyed by an XML namespace-aware path.
 """
 
-from __future__ import absolute_import, unicode_literals
 
 import base64
 import decimal

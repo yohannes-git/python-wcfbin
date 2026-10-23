@@ -26,15 +26,7 @@
 #  THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 #  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 #  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-from __future__ import absolute_import
-from __future__ import unicode_literals
 
-try:
-    import __builtin__  # noqa
-    is_py2 = True
-except ImportError:
-    is_py2 = False
-from builtins import str, chr, bytes
 
 import struct
 import logging
@@ -420,8 +412,6 @@ __records__ = []
 for c in range(0x0C, 0x25 + 1):
     char = chr(c - 0x0C + ord('a'))
     clsname = 'PrefixDictionaryAttribute' + char.upper() + 'Record'
-    if is_py2:
-        clsname = clsname.encode('latin1')
     cls = type(
            clsname,
            (PrefixDictionaryAttributeRecord,),
@@ -436,8 +426,6 @@ for c in range(0x0C, 0x25 + 1):
 for c in range(0x26, 0x3F + 1):
     char = chr(c - 0x26 + ord('a'))
     clsname = 'PrefixAttribute' + char.upper() + 'Record'
-    if is_py2:
-        clsname = clsname.encode('latin1')
     cls = type(
            clsname,
            (PrefixAttributeRecord,),
