@@ -20,6 +20,14 @@ _NCNAME = re.compile('[%s][%s\\-.0-9\xb7̀-ͯ‿⁀]*'
 # characters outside the XML 1.0 Char production
 _NOT_XML_CHAR = re.compile('[^\t\n\r\x20-퟿-�'
                            '\U00010000-\U0010ffff]')
+# the characters that escape_text() / escape_attribute() replace: a value
+# without any (one scan of the regex engine) is returned as it is, without
+# str.translate(), slow on short and on non-ASCII strings
+_TEXT_NEEDS_ESCAPE = re.compile('[^\t\n\x20-\x25\x27-\x3b\x3d\x3f-\ud7ff'
+                                '\ue000-\ufffd\U00010000-\U0010ffff]')
+_ATTRIBUTE_NEEDS_ESCAPE = re.compile('[^\x20\x21\x23-\x25\x27-\x3b\x3d'
+                                     '\x3f-\ud7ff\ue000-\ufffd'
+                                     '\U00010000-\U0010ffff]')
 _TEXT_ESCAPES = str.maketrans({'&': '&amp;', '<': '&lt;', '>': '&gt;',
                                '\r': '&#13;'})
 _ATTRIBUTE_ESCAPES = str.maketrans({'&': '&amp;', '<': '&lt;', '>': '&gt;',
@@ -65,6 +73,8 @@ def escape_text(value):
     >>> escape_text('a<b>&\\r\\x00')
     'a&lt;b&gt;&amp;&#13;&#0;'
     """
+    if _TEXT_NEEDS_ESCAPE.search(value) is None:
+        return value
     return _escape(value, _TEXT_ESCAPES)
 
 
@@ -74,6 +84,8 @@ def escape_attribute(value):
     >>> escape_attribute('"\\t\\n')
     '&quot;&#9;&#10;'
     """
+    if _ATTRIBUTE_NEEDS_ESCAPE.search(value) is None:
+        return value
     return _escape(value, _ATTRIBUTE_ESCAPES)
 
 
