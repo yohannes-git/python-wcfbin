@@ -72,8 +72,61 @@ namespace TisInterop
         [DataMember] public string Unicode;
     }
 
+    [DataContract(Namespace = "urn:tis:interop")]
+    [KnownType(typeof(Color))]
+    [KnownType(typeof(Derived))]
+    public class Extra
+    {
+        [DataMember] public object[] Objs;
+        [DataMember] public XmlElement Xml;
+    }
+
+    [DataContract(Namespace = "urn:tis:interop")]
+    public class Detail
+    {
+        [DataMember] public int Code;
+        [DataMember] public string Text;
+    }
+
     public static class Gen
     {
+        public static Extra SampleExtra(int i)
+        {
+            var doc = new XmlDocument();
+            doc.LoadXml("<x:Any xmlns:x='urn:tis:any' a='1'>text <x:Child>" + i + "</x:Child></x:Any>");
+            return new Extra
+            {
+                Objs = new object[] { 1, "s", 2.5, 2.5f, 1.50m, true, (byte)7, (long)-1,
+                                      new DateTime(2006, 5, 17, 1, 2, 3, DateTimeKind.Utc),
+                                      new Guid("33221100-5544-7766-8899-aabbccddeeff"),
+                                      TimeSpan.FromMinutes(90), new byte[] { 1, 2 },
+                                      new Uri("http://x/"), Color.Red,
+                                      new Derived { Name = "d", Extra = i }, null },
+                Xml = doc.DocumentElement
+            };
+        }
+
+        static Message MakeExtra(string kind, int i)
+        {
+            Message m;
+            if (kind == "fault")
+            {
+                var fault = MessageFault.CreateFault(
+                    FaultCode.CreateSenderFaultCode("InvalidThing", "urn:tis:faults"),
+                    new FaultReason("The thing " + i + " is invalid"),
+                    new Detail { Code = 42 + i, Text = "détail <&>" },
+                    new DataContractSerializer(typeof(Detail)));
+                m = Message.CreateMessage(MessageVersion.Soap12WSAddressing10, fault, "urn:tis:interop/Fault");
+            }
+            else
+            {
+                m = Message.CreateMessage(MessageVersion.Soap12WSAddressing10, "urn:tis:interop/Extra",
+                                          SampleExtra(i), new DataContractSerializer(typeof(Extra)));
+            }
+            m.Headers.RelatesTo = new UniqueId(new Guid("4e1e8f3e-4a3a-4a2b-9e5c-7d9a1f1b2c3" + i.ToString()));
+            return m;
+        }
+
         public static All Sample(int i)
         {
             var a = new All();
@@ -155,13 +208,15 @@ namespace TisInterop
             var inSession = factory.CreateSessionEncoder();
             var plain = factory.Encoder;
             var sb = new StringBuilder();
-            for (int i = 0; i < count; i++)
+            for (int i = 0; i < 3 * count; i++)
             {
+                string kind = i < count ? "all" : i < 2 * count ? "extra" : "fault";
                 foreach (var mode in new[] { "session", "plain" })
                 {
                     var enc = mode == "session" ? outSession : plain;
                     var dec = mode == "session" ? inSession : plain;
-                    var seg = enc.WriteMessage(Make(Sample(i), i), 1 << 24, bm);
+                    var msg = kind == "all" ? Make(Sample(i), i) : MakeExtra(kind, i);
+                    var seg = enc.WriteMessage(msg, 1 << 24, bm);
                     string hex = Hex(seg);
                     var copy = new byte[seg.Count];
                     Array.Copy(seg.Array, seg.Offset, copy, 0, seg.Count);
@@ -191,14 +246,41 @@ namespace TisInterop
                 {
                     var msg = enc.ReadMessage(new ArraySegment<byte>(Unhex(parts[2])), bm, enc.ContentType);
                     string action = msg.Headers.Action;
-                    var got = msg.GetBody<All>(ser);
-                    var want = Sample(i);
                     var diffs = new List<string>();
-                    if (action != "urn:tis:interop/Action") diffs.Add("Action=" + action);
-                    foreach (var f in typeof(All).GetFields())
+                    if (action == "urn:tis:interop/Fault")
                     {
-                        string a = Show(f.GetValue(want)), b = Show(f.GetValue(got));
-                        if (a != b) diffs.Add(f.Name + ": want " + Trunc(a) + " got " + Trunc(b));
+                        var fault = MessageFault.CreateFault(msg, 1 << 20);
+                        var detail = fault.GetDetail<Detail>(new DataContractSerializer(typeof(Detail)));
+                        string want = "InvalidThing/urn:tis:faults/The thing " + i + " is invalid/" + (42 + i) + "/détail <&>";
+                        string got = fault.Code.SubCode.Name + "/" + fault.Code.SubCode.Namespace + "/" +
+                                     fault.Reason.GetMatchingTranslation().Text + "/" + detail.Code + "/" + detail.Text;
+                        if (!fault.Code.IsSenderFault || want != got) diffs.Add("fault: want " + want + " got " + got);
+                    }
+                    else if (action == "urn:tis:interop/Extra")
+                    {
+                        var got = msg.GetBody<Extra>(new DataContractSerializer(typeof(Extra)));
+                        var want = SampleExtra(i);
+                        string a = Show(want.Objs), b = Show(got.Objs);
+                        if (a != b) diffs.Add("Objs: want " + Trunc(a) + " got " + Trunc(b));
+                        for (int k = 0; k < want.Objs.Length; k++)
+                            if ((want.Objs[k] == null) != (got.Objs[k] == null) ||
+                                (want.Objs[k] != null && want.Objs[k].GetType() != got.Objs[k].GetType()))
+                                diffs.Add("Objs[" + k + "] type: want " + (want.Objs[k] == null ? "null" : want.Objs[k].GetType().Name) +
+                                          " got " + (got.Objs[k] == null ? "null" : got.Objs[k].GetType().Name));
+                        // the order of the attributes is not significant (.NET
+                        // itself writes the attributes before the declarations)
+                        if (Canon(want.Xml) != Canon(got.Xml)) diffs.Add("Xml: want " + want.Xml.OuterXml + " got " + got.Xml.OuterXml);
+                    }
+                    else
+                    {
+                        var got = msg.GetBody<All>(ser);
+                        var want = Sample(i);
+                        if (action != "urn:tis:interop/Action") diffs.Add("Action=" + action);
+                        foreach (var f in typeof(All).GetFields())
+                        {
+                            string a = Show(f.GetValue(want)), b = Show(f.GetValue(got));
+                            if (a != b) diffs.Add(f.Name + ": want " + Trunc(a) + " got " + Trunc(b));
+                        }
                     }
                     sb.Append(mode).Append('\t').Append(i).Append('\t').Append(diffs.Count == 0 ? "OK" : string.Join(" | ", diffs.ToArray())).Append('\n');
                 }
@@ -208,6 +290,18 @@ namespace TisInterop
                 }
             }
             return sb.ToString();
+        }
+
+        static string Canon(XmlNode node)
+        {
+            var e = node as XmlElement;
+            if (e == null) return node.Value;
+            var attrs = new List<string>();
+            foreach (XmlAttribute a in e.Attributes) attrs.Add(a.NamespaceURI + "|" + a.LocalName + "=" + a.Value);
+            attrs.Sort(StringComparer.Ordinal);
+            var sb = new StringBuilder("{" + e.NamespaceURI + "}" + e.LocalName + "[" + string.Join(",", attrs.ToArray()) + "](");
+            foreach (XmlNode c in e.ChildNodes) sb.Append(Canon(c)).Append(';');
+            return sb.Append(')').ToString();
         }
 
         static string Trunc(string s) { return s.Length > 80 ? s.Substring(0, 80) + "..." : s; }

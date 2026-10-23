@@ -91,7 +91,7 @@ class DotnetInteropTests(unittest.TestCase):
                 self.assertEqual([], differences(ET.fromstring(xml),
                                                  ET.fromstring(dotnet)))
                 count += 1
-        self.assertEqual(4, count)
+        self.assertEqual(12, count)  # 2 x (2 All, 2 Extra, 2 faults)
 
     def test_session_strings_are_reused(self):
         sizes = [len(data) for mode, i, data, xml, dotnet in self.decode()
