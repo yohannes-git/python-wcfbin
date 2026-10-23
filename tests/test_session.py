@@ -137,11 +137,14 @@ class NbfseTests(unittest.TestCase):
             with self.subTest(refused=refused):
                 with self.assertRaises(ValueError):
                     s.parse_document(refused)
+                self.assertTrue(s.out_of_step)
                 with self.assertRaisesRegex(ValueError, 'out of step'):
                     s.parse_document(b'\x00\x40\x01a\x01')
                 s.reset()
+                self.assertFalse(s.out_of_step)
                 self.assertEqual('<a></a>', s.parse_document(b'\x00\x40\x01a\x01').render_xml())
         s = BinaryXmlSession(max_document_bytes=10)
+        self.assertFalse(s.out_of_step)
         with self.assertRaises(ValueError):
             s.parse_document(b'\x00' + b'\x40\x01a\x01' * 5)
         with self.assertRaisesRegex(ValueError, 'out of step'):
@@ -154,6 +157,7 @@ class NbfseTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             s.parse_document(encode_string_table(['x', 'y']) + b'\x40\x01r')
         self.assertEqual({1: 'x', 3: 'y'}, s.dictionary)
+        self.assertFalse(s.out_of_step)
         doc = s.parse_document(encode_string_table(['z']) + b'\x42\x01\x42\x05\x01\x01')
         self.assertEqual('<x><z></z></x>', doc.render_xml())
 

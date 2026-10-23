@@ -156,6 +156,11 @@ consecutive **odd** IDs 1, 3, 5, ... which can be referenced by subsequent
 documents in the same session. The MC-NBFS built-in dictionary has even IDs.
 The application, not this document codec, handles message framing and session
 lifetime; never share an instance between different peers or directions.
+The strings of a valid StringTable are kept even if the document that
+follows is refused. When the StringTable itself is refused, the IDs that
+the producer assigned are unknown: `out_of_step` becomes true, every
+following document is refused until `reset()`, and the transport should
+close the connection.
 
 ```python
 from wcf.session import BinaryXmlSession

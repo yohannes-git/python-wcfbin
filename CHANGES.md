@@ -34,6 +34,8 @@ New:
 
 * `wcf.session.BinaryXmlSession`: MC-NBFSE StringTables (session
   dictionary with odd ids), bounded, kept for the following documents.
+  After a refused StringTable it is `out_of_step` and refuses every
+  document until `reset()`.
 * `wcf.records.Quotas`, `DEFAULT_QUOTAS`, `NO_QUOTAS`.
 * `wcf.errors.WcfBinaryError`, `wcf.dictionary.UnknownDictionaryId`.
 * `wcf.xmltext`: XML names, escaping and comments.

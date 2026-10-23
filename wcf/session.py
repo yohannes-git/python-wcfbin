@@ -101,6 +101,13 @@ class BinaryXmlSession:
         """Copy of all session entries, with odd integer IDs."""
         return self._entries.copy()
 
+    @property
+    def out_of_step(self):
+        """True after a refused StringTable: the session no longer knows
+        the IDs of the producer, and refuses every document until reset().
+        A transport should then close the connection."""
+        return self._out_of_step
+
     def reset(self):
         """Reset at the end of an MC-NMF session; never retain across peers.
 
