@@ -180,6 +180,81 @@ class QuotaTests(unittest.TestCase):
             with self.subTest(record=record):
                 self.assertLessEqual(len(str(record)), record.max_chars)
 
+    def test_max_chars_is_the_longest_rendering(self):
+        # an upper bound that is not reached would charge the quotas more
+        # than the document represents
+        from wcf.records import (Record, Text, ZeroTextRecord, OneTextRecord,
+                                 TrueTextRecord, FalseTextRecord, EmptyTextRecord,
+                                 EndListTextRecord)
+        from tests.support import local_times
+        longest = [
+            Int8TextRecord(-128), Int16TextRecord(-32768), Int32TextRecord(-2 ** 31),
+            Int64TextRecord(-2 ** 63), UInt64TextRecord(2 ** 64 - 1), BoolTextRecord(False),
+            ZeroTextRecord(), OneTextRecord(), TrueTextRecord(), FalseTextRecord(),
+            EmptyTextRecord(),
+            DecimalTextRecord(Decimal(True, 2 ** 32 - 1, 2 ** 64 - 1, 28)),
+            FloatTextRecord(struct.unpack('<f', struct.pack('<I', 0xa9e821a4))[0]),  # -1.03087054E-13
+            DoubleTextRecord(-2.2250738585072014e-308),
+            UniqueIdTextRecord('urn:uuid:33221100-5544-7766-8899-aabbccddeeff'),
+            UuidTextRecord('33221100-5544-7766-8899-aabbccddeeff'),
+            TimeSpanTextRecord(-2 ** 63)]
+        lengths = {type(r): len(str(r)) for r in longest}
+        lengths[EndListTextRecord] = 0  # renders nothing, it closes a list
+        # a local time with its offset, on a host 14 hours ahead of UTC
+        max_ticks = 3155378976000000000
+        local, = local_times('XST-14', [max_ticks - 1 - 14 * 3600 * 10 ** 7])
+        self.assertEqual('9999-12-31T23:59:59.9999999+14:00', local)
+        lengths[DatetimeTextRecord] = len(local)
+        fixed = {cls for cls in Record.records.values()
+                 if issubclass(cls, Text) and cls.max_chars is not None}
+        self.assertEqual(fixed, set(lengths))
+        for cls in fixed:
+            with self.subTest(record=cls.__name__):
+                self.assertEqual(cls.max_chars, lengths[cls])
+
+    def test_cost_of_a_document(self):
+        # what max_chars counts: the names (twice for an element), the
+        # values, comments, xmlns prefixes and namespaces, one separator
+        # per list item, every array item with its element and attributes
+        # (the attributes of an array also once as read)
+        for wire, cost in (
+                (b'\x40\x01a\x99\x03xyz', 2 + 3),                       # <a>xyz</a>
+                (b'\x41\x01p\x01a\x01', 2 * 3),                         # <p:a></p:a>
+                (b'\x40\x01a\x02\x03abc\x01', 2 + 3),                  # <!--abc-->
+                (b'\x40\x01a\x05\x01p\x01b\x98\x01v\x01', 2 + 3 + 1),   # p:b="v"
+                (b'\x40\x01a\x09\x01p\x05urn:x\x01', 2 + 1 + 5),        # xmlns:p="urn:x"
+                (b'\x40\x01a\xa4\x98\x01x\x98\x02yz\xa6\x01', 2 + 2 + 3),  # "x yz"
+                (b'\x40\x01a\x89\x80', 2 + 4),                          # Int8: up to "-128"
+                (b'\x40\x01a\x9f\x04abcd', 2 + 8),                      # base64 "YWJjZA=="
+                (b'\x03\x40\x01a\x01\x8d\x02' + b'\x00' * 8, 2 * (2 + 11)),
+                (b'\x03\x40\x03abc\x01\x8d\x02' + b'\x00' * 8, 2 * (6 + 11)),
+                (b'\x03\x40\x01a\x04\x01b\x98\x01v\x01\x8d\x02' + b'\x00' * 8,
+                 2 + 2 * (2 + 11 + 2))):
+            with self.subTest(wire=wire):
+                parse(wire, Quotas(max_chars=cost))
+                with self.assertRaisesRegex(ValueError, 'characters'):
+                    parse(wire, Quotas(max_chars=cost - 1))
+
+    def test_records_of_a_document(self):
+        # what max_records counts: every element, attribute, text, comment,
+        # list item and array item
+        for wire, records in (
+                (b'\x40\x01a\x01', 1),
+                (b'\x40\x01a\x99\x03xyz', 2),
+                (b'\x40\x01a\x02\x03abc\x01', 2),
+                (b'\x40\x01a\x04\x01b\x98\x01v\x01', 3),
+                (b'\x40\x01a\xa4\x98\x01x\x98\x02yz\xa6\x01', 4)):
+            with self.subTest(wire=wire):
+                parse(wire, Quotas(max_records=records))
+                with self.assertRaisesRegex(ValueError, 'records'):
+                    parse(wire, Quotas(max_records=records - 1))
+
+    def test_bytes_char_count_is_the_base64_length(self):
+        from wcf.records import Bytes8TextRecord
+        for n in range(10):
+            record = Bytes8TextRecord(bytes(n))
+            self.assertEqual(len(str(record)), record.char_count(), n)
+
 
 if __name__ == '__main__':
     unittest.main()

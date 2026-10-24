@@ -285,6 +285,20 @@ class BinaryFidelity(unittest.TestCase):
         self.assertEqual(['0001-01-01T21:00:00-05:00', '2006-05-17T03:20:30.123-05:00'],
                          local_times('XST+05', [2 * hour, utc]))
 
+    def test_datetime_local_boundaries(self):
+        # the last day below the 62-bit ceiling is a time before
+        # 0001-01-01T00:00:00Z; the local time must stay in years 1 to 9999
+        ceiling, day, hour = 1 << 62, 864000000000, 3600 * 10 ** 7
+        max_ticks = 3155378976000000000
+        self.assertEqual([
+            'WcfBinaryError',                        # not folded: beyond 9999
+            '0001-01-01T02:00:00.0000001+02:00',     # folded: -1 day + 100 ns
+            '0001-01-01T00:00:00+02:00',             # local time 0
+            '9999-12-31T23:59:59.9999999+02:00',     # the last local time
+            'WcfBinaryError',                        # one tick later
+        ], local_times('XST-02', [ceiling - day, ceiling - day + 1, ceiling - 2 * hour,
+                                   max_ticks - 1 - 2 * hour, max_ticks - 2 * hour]))
+
     def test_decimal_less_than_one(self):
         self.assertEqual('0.001', str(Decimal(False, 0, 1, 3)))
         self.assertEqual('-0.01', str(Decimal(True, 0, 1, 2)))

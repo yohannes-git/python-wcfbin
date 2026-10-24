@@ -129,6 +129,49 @@ class XmlInputTests(unittest.TestCase):
             with self.subTest(text=text), self.assertRaises(ValueError):
                 XMLParser.parse('<v>%s</v>' % text, type_overrides={'/v': 'bool'})
 
+    def test_integer_ranges(self):
+        for kind, low, high in (('int8', -2 ** 7, 2 ** 7 - 1), ('int16', -2 ** 15, 2 ** 15 - 1),
+                                ('int32', -2 ** 31, 2 ** 31 - 1), ('int64', -2 ** 63, 2 ** 63 - 1),
+                                ('uint64', 0, 2 ** 64 - 1)):
+            for value in (low, high):
+                with self.subTest(kind=kind, value=value):
+                    records = XMLParser.parse('<v>%d</v>' % value, type_overrides={'/v': kind})
+                    self.assertEqual(value, records[0].childs[0].value)
+            for value in (low - 1, high + 1):
+                with self.subTest(kind=kind, value=value), self.assertRaises(ValueError):
+                    XMLParser.parse('<v>%d</v>' % value, type_overrides={'/v': kind})
+
+    def test_decimal_digits(self):
+        # a DECIMAL holds 96 bits and a scale of 0 to 28
+        for text in ('0.' + '1' * 28, '0.' + '1' * 28 + '000', '7' * 28 + '.0',
+                     '79228162514264337593543950335'):
+            with self.subTest(text=text):
+                XMLParser.parse('<d>%s</d>' % text, type_overrides={'/d': 'decimal'})
+        for text in ('0.' + '1' * 29, '1' * 30):
+            with self.subTest(text=text), self.assertRaises(ValueError):
+                XMLParser.parse('<d>%s</d>' % text, type_overrides={'/d': 'decimal'})
+
+    def test_letter_prefixes(self):
+        # the Prefix* records serve the prefixes "a" to "z"
+        records = XMLParser.parse('<a:x xmlns:a="urn:a" a:b="1"><z:y xmlns:z="urn:z" z:c9="2"/>'
+                                  '<A:w xmlns:A="urn:A"/></a:x>')
+        self.assertEqual('PrefixElementARecord', type(records[0]).__name__)
+        self.assertEqual('PrefixAttributeARecord', type(records[0].attributes[1]).__name__)
+        z, upper = records[0].childs
+        self.assertEqual('PrefixElementZRecord', type(z).__name__)
+        self.assertEqual('PrefixAttributeZRecord', type(z.attributes[1]).__name__)
+        self.assertEqual('ElementRecord', type(upper).__name__)
+
+    def test_shortest_chars_record(self):
+        # Chars8Text holds 255 UTF-8 bytes: 63 four-byte characters, not 64
+        for text, record in (('x' * 255, 'Chars8TextRecord'), ('x' * 256, 'Chars16TextRecord'),
+                             ('\U0001F600' * 63, 'Chars8TextRecord'),
+                             ('\U0001F600' * 64, 'Chars16TextRecord')):
+            with self.subTest(length=len(text), record=record):
+                value = XMLParser.parse('<v>%s</v>' % text)[0].childs[0]
+                self.assertEqual(record, type(value).__name__)
+                self.assertEqual(text, value.value)
+
     def test_uuid_literals(self):
         # what uuid.UUID() takes but the records would not render
         uuid = '33221100-5544-7766-8899-aabbccddeeff'
