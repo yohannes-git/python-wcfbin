@@ -147,6 +147,12 @@ class XmlInputTests(unittest.TestCase):
                      '79228162514264337593543950335'):
             with self.subTest(text=text):
                 XMLParser.parse('<d>%s</d>' % text, type_overrides={'/d': 'decimal'})
+        # the scale is kept: trailing zeros are dropped only beyond 28
+        for text, scale in (('0.' + '1' * 27 + '0', 28), ('0.' + '1' * 27 + '00', 28),
+                            ('1.50', 2)):
+            with self.subTest(text=text):
+                records = XMLParser.parse('<d>%s</d>' % text, type_overrides={'/d': 'decimal'})
+                self.assertEqual(scale, records[0].childs[0].value.scale)
         for text in ('0.' + '1' * 29, '1' * 30):
             with self.subTest(text=text), self.assertRaises(ValueError):
                 XMLParser.parse('<d>%s</d>' % text, type_overrides={'/d': 'decimal'})

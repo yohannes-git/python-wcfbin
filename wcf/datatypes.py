@@ -270,8 +270,10 @@ class Decimal(object):
         if match is None or not (match.group(2) or match.group(3)):
             raise WcfBinaryError('Invalid decimal %r' % (text,))
         sign, integer, fraction = match.group(1), match.group(2), match.group(3) or ''
-        if len(fraction) > 28:
-            fraction = fraction.rstrip('0')
+        # zeros beyond the 28th decimal place are dropped, not the others:
+        # the scale is part of the value ("1.50")
+        if len(fraction) > 28 and not fraction[28:].strip('0'):
+            fraction = fraction[:28]
         digits = (integer + fraction).lstrip('0')
         # 2^96 has 29 digits: checked before any conversion
         if len(fraction) > 28 or len(digits) > 29:
