@@ -252,18 +252,23 @@ _OTHER, _TEXT, _TEXT_END, _ELEMENT, _ATTRIBUTE, _END, _COMMENT, _ARRAY = (
 Record._kind = _OTHER
 
 
-class Element(Record):
-    """An element record: ``prefix`` (None without), ``name``,
-    ``attributes`` and ``childs``. ``_wcf_closure`` is how a decoded
-    element was closed: 'explicit' (EndElement) or 'implicit'
-    (*TextWithEndElement), kept when it is serialized again."""
+class _Qualified(Record):
+    """The element and attribute records: ``prefix`` (None without) and
+    ``name``."""
     prefix = None
-    _wcf_closure = None
-    _kind = _ELEMENT
 
     @property
     def qname(self):
         return self.name if self.prefix is None else '%s:%s' % (self.prefix, self.name)
+
+
+class Element(_Qualified):
+    """An element record: ``prefix`` (None without), ``name``,
+    ``attributes`` and ``childs``. ``_wcf_closure`` is how a decoded
+    element was closed: 'explicit' (EndElement) or 'implicit'
+    (*TextWithEndElement), kept when it is serialized again."""
+    _wcf_closure = None
+    _kind = _ELEMENT
 
     def __str__(self):
         """The start tag.
@@ -277,18 +282,13 @@ class Element(Record):
         return start_tag(self)
 
 
-class Attribute(Record):
+class Attribute(_Qualified):
     """An attribute record: ``prefix`` (None without), ``name`` and
     ``value`` (a text record); or, for a namespace declaration
     (``is_xmlns``), ``prefix`` (None for the default namespace) and
     ``namespace``."""
-    prefix = None
     is_xmlns = False
     _kind = _ATTRIBUTE
-
-    @property
-    def qname(self):
-        return self.name if self.prefix is None else '%s:%s' % (self.prefix, self.name)
 
     def __str__(self):
         return attribute_xml(self)[1:]
