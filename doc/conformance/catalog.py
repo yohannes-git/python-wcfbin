@@ -39,7 +39,7 @@ NBFX_1 = [
     ('NBFX-1.5-APPLICABILITY', '"capable of representing only a subset of information '
      'described by an XML information set"', '-', [], 'H',
      'Applicability statement; the constructs it lists are traced one by one below.'),
-    ('NBFX-1.5-EMPTY-ELEMENT', '"`<element/>` Not supported, `<element></element>` Supported"',
+    ('NBFX-1.5-EMPTY-ELEMENT', '"`<element/> <!-- Not supported -->` ... `<element></element> <!-- Supported -->`"',
      RENDER + ' (start and end tags always written); xml2records.py `XMLParser`',
      ['doctest:wcf.xml2records.XMLParser', 'test_conformance::test_comment_outside_root'], 'C', ''),
     ('NBFX-1.5-CDATA', '"a CDATA section cannot be encoded; however, a semantically '
@@ -108,21 +108,21 @@ NBFX_2_1_1 = [
 NBFX_2_1_2 = [
     ('NBFX-2.1.2-UNSIGNED-31', '"an unsigned 31-bit integer value in a variable-length packet"', MBI,
      ['test_conformance::test_multi_byte_int_31_full_range'], 'C', ''),
-    ('NBFX-2.1.2-SIZE-1', '"0x00 to 0x7F: 1 byte"', MBI,
+    ('NBFX-2.1.2-SIZE-1', 'range "0x00 to 0x7F", packet size "1 byte"', MBI,
      ['doctest:wcf.datatypes.MultiByteInt31.to_bytes', 'test_conformance::test_multi_byte_int_31_full_range'], 'C', ''),
-    ('NBFX-2.1.2-SIZE-2', '"0x0080 to 0x3FFF: 2 bytes"', MBI,
+    ('NBFX-2.1.2-SIZE-2', 'range "0x0080 to 0x3FFF", packet size "2 bytes"', MBI,
      ['doctest:wcf.datatypes.MultiByteInt31.to_bytes', 'test_conformance::test_multi_byte_int_31_full_range'], 'C', ''),
-    ('NBFX-2.1.2-SIZE-3', '"0x004000 to 0x1FFFFF: 3 bytes"', MBI,
+    ('NBFX-2.1.2-SIZE-3', 'range "0x004000 to 0x1FFFFF", packet size "3 bytes"', MBI,
      ['doctest:wcf.datatypes.MultiByteInt31.to_bytes', 'test_conformance::test_multi_byte_int_31_full_range'], 'C', ''),
-    ('NBFX-2.1.2-SIZE-4', '"0x00200000 to 0x0FFFFFFF: 4 bytes"', MBI,
+    ('NBFX-2.1.2-SIZE-4', 'range "0x00200000 to 0x0FFFFFFF", packet size "4 bytes"', MBI,
      ['doctest:wcf.datatypes.MultiByteInt31.to_bytes', 'test_conformance::test_multi_byte_int_31_full_range'], 'C', ''),
-    ('NBFX-2.1.2-SIZE-5', '"0x0010000000 to 0x007FFFFFFF: 5 bytes"', MBI,
+    ('NBFX-2.1.2-SIZE-5', 'range "0x0010000000 to 0x007FFFFFFF", packet size "5 bytes"', MBI,
      ['doctest:wcf.datatypes.MultiByteInt31.to_bytes', 'test_conformance::test_multi_byte_int_31_full_range'], 'C', ''),
     ('NBFX-2.1.2.1-EX-17', '"decimal 17 ... 0x11"', MBI, [], 'I', ''),
     ('NBFX-2.1.2.2-EX-145', '"decimal 145 ... 0x91 0x01"', MBI, [], 'I', ''),
     ('NBFX-2.1.2.2-EX-5521', '"decimal 5521 ... 0x91 0x2B"', MBI, [], 'I', ''),
     ('NBFX-2.1.2.3-EX-16384', '"decimal 16384 ... 0x80 0x80 0x01"', MBI, [], 'I', ''),
-    ('NBFX-2.1.2.4-EX', '"decimal 268435456 is encoded in 4 bytes ... 0x80 0x80 0x80 0x01"', MBI, [], 'I',
+    ('NBFX-2.1.2.4-EX', '"the decimal value 268435456 is encoded in 4 bytes ... 0x80 0x80 0x80 0x01"', MBI, [], 'I',
      'Specification erratum: these 4 bytes are 2097152 (0x200000); 268435456 is 0x10000000, '
      '5 bytes (range table, example of 2.1.2.5). The library follows the range table.'),
     ('NBFX-2.1.2.5-EX-268435456', '"decimal 268435456 ... 0x80 0x80 0x80 0x80 0x01"', MBI,
@@ -137,8 +137,8 @@ NBFX_2_1_2 = [
 ]
 
 NBFX_2_1_3_4 = [
-    ('NBFX-2.1.3-LENGTH-MBI31-BYTES', '"Length: the length in bytes of the string when encoded in '
-     'UTF-8 ... MUST be encoded using MultiByteInt31"', STR,
+    ('NBFX-2.1.3-LENGTH-MBI31-BYTES', 'Length (variable): "This is the length in bytes of the string when encoded in '
+     'UTF-8, as specified in [RFC2279], and MUST be encoded using MultiByteInt31"', STR,
      ['test_conformance::test_utf8_string_length_uses_multibyte_int', 'doctest:wcf.datatypes.Utf8String.to_bytes'],
      'C', ''),
     ('NBFX-2.1.3-UTF8', '"Bytes ... MUST be encoded in UTF-8"', STR,
@@ -151,7 +151,7 @@ NBFX_2_1_3_4 = [
      ['test_render::test_element_name', 'test_render::test_comment'], 'E',
      'Decoded and encoded as is; README: render_xml() refuses names that are not NCNames and '
      'comments XML cannot carry.'),
-    ('NBFX-2.1.4-MBI31', '"Value: An integer value encoded using MultiByteInt31"',
+    ('NBFX-2.1.4-MBI31', 'Value (variable): "An integer value encoded using MultiByteInt31"',
      'text.py `DictionaryTextRecord.to_bytes`/811 `DictionaryTextRecord`, base.py `_NamedRecord._head`/374',
      ['test_example_document::test_round_trip', 'doctest:wcf.records.text.DictionaryTextRecord.to_bytes'], 'C', ''),
     ('NBFX-2.1.4-MAPPING', '"The string that the integer refers to is determined by the producer '
@@ -165,8 +165,8 @@ NBFX_2_2 = [
      'MUST use the exact casing depicted"', 'text.py (constants, ' + IEEE + ', UUIDs)',
      ['test_microsoft_boundaries::test_double_special_and_exponent',
       'doctest:wcf.records.text.UniqueIdTextRecord.__str__'], 'C', ''),
-    ('NBFX-2.2-CATEGORIES', '"Element Records, Attribute Records, Text Records, Miscellaneous '
-     'Records"', 'base.py `Element`, `Attribute`, `Text`', [], 'H', 'Informative.'),
+    ('NBFX-2.2-CATEGORIES', '"Element Records", "Attribute Records", "Text Records", '
+     '"Miscellaneous Records"', 'base.py `Element`, `Attribute`, `Text`', [], 'H', 'Informative.'),
 ]
 
 
@@ -249,7 +249,7 @@ def _attribute(sec, cls_ref, prefix, name_kind, ex, ex_tests, tests, value='text
              tests.get('NX', []), 'C' if tests.get('NX') else 'I', ''),
         ]
     if value == 'text':
-        rows.append(('NBFX-%s-VALUE-TEXT' % sec, 'Value: "encoded using a (single) text record"',
+        rows.append(('NBFX-%s-VALUE-TEXT' % sec, 'Value: "The value of the attribute encoded using ... text record" (one record)',
                      cls_ref + '; ' + VALUE, tests.get('VT', []), 'C' if tests.get('VT') else 'I', ''))
     elif value == 'string':
         rows.append(('NBFX-%s-VALUE-STRING' % sec, 'Value: "encoded using String"',
@@ -426,7 +426,7 @@ NBFX_2_2_3 += [
      ['test_conformance::test_datetime_preserves_100_ns_and_utc'], 'C', ''),
     ('NBFX-2.2.3.12-TZ-UTC', '"If TZ is one ... a trailing character "Z""', DT,
      ['test_conformance::test_datetime_preserves_100_ns_and_utc'], 'C', ''),
-    ('NBFX-2.2.3.12-TZ-LOCAL', '"If TZ is two ... +HH:mm / -HH:mm ... the time zone offset in which the '
+    ('NBFX-2.2.3.12-TZ-LOCAL', '"If TZ is two ... +HH:mm ... -HH:mm" and "The UTC offset MUST be the time zone offset in which the '
      'document is being decoded"', DT,
      ['test_conformance::test_datetime_local_as_dotnet_from_binary'], 'E',
      'README (examples and .NET followed): the field holds the UTC ticks (DateTime.ToBinary()), '
@@ -438,15 +438,15 @@ NBFX_2_2_3 += [
      DT, [], 'I', ''),
     ('NBFX-2.2.3.13-LENGTH-UINT8', 'Chars8Text Length: "represented as UINT8"', LEN + '; text.py `Chars8TextRecord`',
      ['doctest:wcf.records.text._Utf8Text', 'test_conformance::test_unicode_text_lengths'], 'C', ''),
-    ('NBFX-2.2.3.13-UTF8', '"Bytes: The string encoded as UTF-8"', 'text.py `_Utf8Text`',
+    ('NBFX-2.2.3.13-UTF8', 'Bytes (variable): "The string encoded as UTF-8 [RFC2279] bytes"', 'text.py `_Utf8Text`',
      ['test_conformance::test_unicode_text_lengths'], 'C', ''),
     ('NBFX-2.2.3.13-EX', '"length is 3 and bytes = { 0x41, 0x42, 0x43 } ... abc"', 'text.py `_Utf8Text`', [], 'I',
      'Specification erratum: 0x41 0x42 0x43 is "ABC".'),
-    ('NBFX-2.2.3.13-FULLY-FORMED', '"UTF-8 sequences MUST be fully formed ... MUST not be any partial UTF-8 '
-     'sequences within a record"', 'text.py `_LengthPrefixedText._decode`; errors.py `binary_errors`',
+    ('NBFX-2.2.3.13-FULLY-FORMED', '"UTF-8 [RFC2279]-encoded sequences MUST be fully formed. There MUST not be any partial UTF-8 '
+     '[RFC2279] sequences within a record"', 'text.py `_LengthPrefixedText._decode`; errors.py `binary_errors`',
      ['test_xml_input::test_standard_library_errors_are_converted'], 'C', ''),
-    ('NBFX-2.2.3.13-LOW-SURROGATE-ALONE', '"UTF-8 sequences that expand to a low surrogate character MUST be '
-     'paired with a high surrogate"', 'text.py `_LengthPrefixedText._decode`', [], 'I', ''),
+    ('NBFX-2.2.3.13-LOW-SURROGATE-ALONE', '"UTF-8 [RFC2279] sequences that expand to a low surrogate character MUST be '
+     'paired with a high surrogate character"', 'text.py `_LengthPrefixedText._decode`', [], 'I', ''),
     ('NBFX-2.2.3.13-SURROGATE-PAIR', 'idem: a high/low pair of 3-byte sequences (RFC 2279) is valid',
      'text.py `_LengthPrefixedText._decode` (strict UTF-8 refuses every encoded surrogate)', [], 'E',
      'Refused, as the .NET binary reader does (checked on .NET Framework 4.8.1: a pair of 3-byte '
@@ -501,7 +501,8 @@ NBFX_2_2_3 += [
      'record"', PARSE + '; ' + VALUE,
      ['test_conformance::test_endlist_only_allowed_inside_startlist'], 'C', ''),
     ('NBFX-2.2.3.19-UNTERMINATED', 'idem: a StartListText needs its EndListText', 'text.py `StartListTextRecord.parse`', [], 'I', ''),
-    ('NBFX-2.2.3.19-EX', 'StartListText TrueText FalseText ZeroText OneText EndListText is "true false 0 1"',
+    ('NBFX-2.2.3.19-EX', '"StartListText TrueText FalseText ZeroText OneText EndListText is interpreted as the '
+     'following characters. true_false_0_1" (each underscore is a space)',
      'text.py `StartListTextRecord`', [], 'I', ''),
     ('NBFX-2.2.3.20-CHARS', 'EmptyText: "MUST be interpreted as no characters"', 'text.py `EmptyTextRecord`',
      ['test_conformance::test_bool_and_empty_text'], 'C', ''),
@@ -523,7 +524,7 @@ NBFX_2_2_3 += [
      'text.py `TimeSpanTextRecord`', ['doctest:wcf.records.text.TimeSpanTextRecord.__str__'], 'C', ''),
     ('NBFX-2.2.3.23-RANGE', '"from -10675199 days, 2 hours, 48 minutes, and 05.4775808 seconds to ..."',
      'text.py `TimeSpanTextRecord.__str__`', ['test_conformance::test_time_span_ticks_from_microsoft_spec'], 'C', ''),
-    ('NBFX-2.2.3.23-FORMAT', '"[DDDDDDDD.]HH:mm:ss[.fffffff]"', 'text.py `TimeSpanTextRecord.__str__`',
+    ('NBFX-2.2.3.23-FORMAT', '"DDDDDDDD.HH:mm:ss", "DDDDDDDD.HH:mm:ss.fffffff", "HH:mm:ss" or "HH:mm:ss.fffffff"', 'text.py `TimeSpanTextRecord.__str__`',
      ['test_conformance::test_time_span_ticks_from_microsoft_spec',
       'test_microsoft_independent::test_timespan_as_in_section_3_examples_and_dotnet'], 'E',
      'README: xsd:duration, as the section 3 examples ("-PT5M44S", "PT3H20M") and .NET.'),
@@ -544,10 +545,10 @@ NBFX_2_2_3 += [
      ['test_dotnet_interop::test_we_read_what_dotnet_reads'], 'C', 'False items of a BoolTextWithEndElement Array.'),
     ('NBFX-2.2.3.26-TRUE', '"If value is 1 ... true"', 'text.py `BoolTextRecord.__str__`',
      ['test_conformance::test_bool_and_empty_text', 'doctest:wcf.records.text.BoolTextRecord.__str__'], 'C', ''),
-    ('NBFX-2.2.3.27-LENGTH', 'UnicodeChars8Text Length (1 byte): "The length in bytes of the UTF-16 encoded string"',
+    ('NBFX-2.2.3.27-LENGTH', 'UnicodeChars8Text Length (1 byte): "The length in bytes of the UTF-16 [RFC2781]-encoded string"',
      'text.py `_Utf16Text`, `UnicodeChars8TextRecord`', ['doctest:wcf.records.text._Utf16Text',
                                         'test_microsoft_boundaries::test_unicode_chars_odd_length_and_overflow'], 'C', ''),
-    ('NBFX-2.2.3.27-UTF16', '"The string encoded as UTF-16 bytes"', 'text.py `_Utf16Text._encode`, `_Utf16Text._decode`',
+    ('NBFX-2.2.3.27-UTF16', '"The string encoded as UTF-16 [RFC2781] bytes"', 'text.py `_Utf16Text._encode`, `_Utf16Text._decode`',
      ['test_microsoft_boundaries::test_unicode_chars_odd_length_and_overflow'], 'C', ''),
     ('NBFX-2.2.3.27-EX', '"length is 6 and bytes = { 0x41, 0x00, 0x42, 0x00, 0x43, 0x00 } ... abc"', 'text.py `_Utf16Text._decode`',
      [], 'I', 'Specification erratum: these bytes are "ABC".'),
@@ -558,7 +559,7 @@ NBFX_2_2_3 += [
      'E', 'README: INT32, as the section 3 example ("BA 04 00 00 00 33 00 32 00") and .NET.'),
     ('NBFX-2.2.3.30-PREFIX-RANGE', 'QNameDictionaryText Prefix: "A value from 0 to 25 inclusive"',
      'text.py `QNameDictionaryTextRecord` (`QNameDictionaryTextRecord.to_bytes`, `QNameDictionaryTextRecord.parse`)', ['test_robustness::test_rejects_bad_qname_prefix'], 'C', ''),
-    ('NBFX-2.2.3.30-NAME-DICTIONARYSTRING', '"Name: The name encoded as a DictionaryString"', 'text.py `QNameDictionaryTextRecord.to_bytes`, `QNameDictionaryTextRecord.parse`',
+    ('NBFX-2.2.3.30-NAME-DICTIONARYSTRING', 'Name (variable): "The name encoded as a DictionaryString"', 'text.py `QNameDictionaryTextRecord.to_bytes`, `QNameDictionaryTextRecord.parse`',
      ['doctest:wcf.records.text.QNameDictionaryTextRecord.to_bytes'], 'C', ''),
     ('NBFX-2.2.3.30-EX', '"prefix is 1 and name refers to the string "name" ... b:name"', 'text.py `QNameDictionaryTextRecord.__str__`',
      ['doctest:wcf.records.text.QNameDictionaryTextRecord.parse'], 'C', ''),
@@ -583,7 +584,7 @@ NBFX_2_3 = [
     ('NBFX-2.3.1-EX', '`<ENV:envelope>` ... `</ENV:envelope>`', RENDER,
      ['test_conformance::test_array_with_prefix_xml',
       'test_session::test_microsoft_official_soap_example_with_string_table'], 'C', ''),
-    ('NBFX-2.3.2-VALUE-STRING', 'Comment: "Value: The text of the comment encoded using String"',
+    ('NBFX-2.3.2-VALUE-STRING', 'Comment Value (variable): "The text of the comment encoded using String"',
      'base.py `CommentRecord`', ['doctest:wcf.records.base.CommentRecord.to_bytes'], 'C', ''),
     ('NBFX-2.3.2-EX', '"comment" ... `<!--comment-->`', 'base.py `CommentRecord.__str__`; xmltext.py `comment`',
      ['doctest:wcf.records.base.CommentRecord.__str__'], 'C', ''),
@@ -598,7 +599,7 @@ NBFX_2_3 = [
      ['doctest:wcf.records.base.ArrayRecord.to_bytes', 'doctest:wcf.records.base.ArrayRecord.parse'], 'C', ''),
     ('NBFX-2.3.3-RECORDTYPE-TABLE', '"Record Type ... MUST be one of the values in the following table"',
      ARR + '', [], 'I', ''),
-    ('NBFX-2.3.3-LENGTH-MBI31', '"Length: The number of elements, encoded with MultiByteInt31"', ARR + '',
+    ('NBFX-2.3.3-LENGTH-MBI31', 'Length (variable): "The number of elements, encoded with MultiByteInt31"', ARR + '',
      ['test_quotas::test_array_is_charged_before_its_items_are_read'], 'C', ''),
     ('NBFX-2.3.3-LENGTH-NONZERO', '"This MUST not be zero"', ARR + '', [], 'I', ''),
     ('NBFX-2.3.3-EXPANSION', '"MUST be interpreted as ... a series of records where the Element record is repeated '
@@ -644,12 +645,12 @@ NBFS = [
      'dictionary.py `dictionary` static table (even ids only), `_SessionDictionaryView.__getitem__`',
      ['test_session::test_microsoft_wire_layout_and_session_indices', 'test_session::test_unknown_id_is_not_encoded'],
      'C', ''),
-    ('NBFS-2.1-MBI31', '"Value: An even integer value encoded by using MultiByteInt31"', MBI,
+    ('NBFS-2.1-MBI31', 'Value (variable): "An even integer value encoded by using MultiByteInt31"', MBI,
      ['test_example_document::test_round_trip'], 'C', ''),
     ('NBFS-2.1-TABLE-VALUES', '"The value MUST be one of the values shown in the first column ... Even values not '
      'appearing in the following table ... are reserved"', 'dictionary.py `_SessionDictionaryView.__getitem__`', [], 'I', ''),
-    ('NBFS-2.1-TABLE-CHARACTERS', '"The characters ... MUST correspond to the characters -- exactly as they are '
-     'shown -- in the second column"', 'dictionary.py `dictionary`', [], 'I',
+    ('NBFS-2.1-TABLE-CHARACTERS', '"The characters represented by this data structure MUST correspond to the '
+     'characters ... exactly as they are shown ... in the second column of the following table"', 'dictionary.py `dictionary`', [], 'I',
      'All 487 entries (0x00 to 0x3CC) compared with the published table (SHA-256 in the test).'),
     ('NBFS-2.1-EMPTY-0xA2', 'Table entry 0xA2: empty second column', 'dictionary.py `dictionary`', [], 'I',
      'Rendered as no characters; refused as an element or attribute name (nonzero length).'),
@@ -672,7 +673,7 @@ NBFSE = [
      SESS + ' (`BinaryXmlSession.parse_document`, `BinaryXmlSession._encode`)',
      ['test_session::test_truncated_or_invalid_table_and_unknown_ids_rejected',
       'test_session::test_encode_dynamic_and_preserve_lexical_version'], 'C', ''),
-    ('NBFSE-2.1-SIZE-MBI31', '"Size: An integer value that is encoded by using the MultiByteInt31"',
+    ('NBFSE-2.1-SIZE-MBI31', 'Size (variable): "An integer value that is encoded by using the MultiByteInt31 structure"',
      'session.py `encode_string_table`, `BinaryXmlSession.parse_document`', ['test_session::test_string_table_known_bytes'], 'C', ''),
     ('NBFSE-2.1-SIZE-BYTES', '"the overall size in bytes of the String structures that follow"', 'session.py `encode_string_table`',
      ['test_session::test_string_table_known_bytes'], 'C', ''),
@@ -716,8 +717,8 @@ NBFSE = [
      'As NBFS-3-EX-FROM-XML, "1" and "0" are encoded as text by default.'),
     ('NBFSE-4-SAME-AS-NBFS', '"the same security considerations as ... [MC-NBFS] section 4, and ... [MC-NBFX] '
      'section 4"', 'see NBFX-4-*', [], 'H', 'Reference only; traced by NBFX-4-*.'),
-    ('NBFSE-4-LIMIT-STRINGTABLE', '"Consumers of this format have to consider limiting the size of the StringTable '
-     'structures"', SESS + ' (max_table_bytes, max_strings, max_session_bytes)',
+    ('NBFSE-4-LIMIT-STRINGTABLE', '"Consumers of this format have to consider limiting the size of the StringTable ... '
+     'structures that are processed"', SESS + ' (max_table_bytes, max_strings, max_session_bytes)',
      ['test_session::test_limits_and_reset', 'test_session::test_cumulative_session_size'],
      'C', ''),
     ('NBFSE-4-AMPLIFICATION', '"a way to refer to a potentially large piece of information by using a small piece '
