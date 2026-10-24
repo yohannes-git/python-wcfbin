@@ -211,3 +211,10 @@ wire examples, deterministic XML/session round-trips, malformed, truncated
 and mutated binary inputs, the quotas, and IEEE-754 bit-pattern checks.
 Passing local tests is not a statement of universal Microsoft WCF/.NET wire
 interoperability.
+
+The GitHub Actions workflow (`.github/workflows/ci.yml`) runs the suite on
+Python 3.8 to 3.15 (Linux) and on Windows and macOS, the pyflakes checks,
+the coverage (99 % of the branches at least), the regeneration of
+doc/CONFORMANCE.md, the tests of the installed wheel, and, on Windows, both
+directions of tests/dotnet/run.ps1 with the WCF binary message encoder of
+.NET Framework.

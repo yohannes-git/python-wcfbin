@@ -1,0 +1,5 @@
+# Tools of the CI jobs (.github/workflows/ci.yml); the library itself
+# depends on the standard library only.
+build==1.6.1
+coverage==7.17.0
+flake8==7.4.1
