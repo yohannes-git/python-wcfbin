@@ -175,8 +175,11 @@ class BinaryFidelity(unittest.TestCase):
         self.assertEqual('8', str(Record.parse(io.BytesIO(encoded))[0].childs[0]))
 
     def test_byte_identical_real_example(self):
-        from pathlib import Path
-        binary = (Path(__file__).parent.parent / 'example.bin').read_bytes()
+        # example.bin, here so that a copy without the binary file (the
+        # bundled copy of Samba, a source patch) still has the test
+        binary = bytes.fromhex(
+            '56020b0161060b0173045608440a1e00829906616374696f6e01560e4009496e'
+            '76656e746f7279810101')
         self.assertEqual(binary, dump_records(Record.parse(io.BytesIO(binary))))
 
     def test_array_namespace_and_attributes(self):
