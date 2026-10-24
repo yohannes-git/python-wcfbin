@@ -161,6 +161,26 @@ class NbfseTests(unittest.TestCase):
         doc = s.parse_document(encode_string_table(['z']) + b'\x42\x01\x42\x05\x01\x01')
         self.assertEqual('<x><z></z></x>', doc.render_xml())
 
+    def test_producer_limits(self):
+        # the limits of the session apply to what it produces too, and a
+        # refused document adds nothing
+        s = BinaryXmlSession(max_strings=2)
+        with self.assertRaisesRegex(ValueError, 'dictionary limit'):
+            s.encode_xml('<a/>', new_strings=['a', 'b', 'c'])
+        s = BinaryXmlSession(max_document_bytes=20)
+        with self.assertRaisesRegex(ValueError, 'document size limit'):
+            s.encode_xml('<a>%s</a>' % ('x' * 30), new_strings=['a'])
+        self.assertEqual({}, s.dictionary)
+        with self.assertRaises(TypeError):
+            s.encode_xml('<a/>', new_strings=[b'a'])
+
+    def test_document_dictionary(self):
+        receiver = BinaryXmlSession()
+        doc = receiver.parse_document(encode_string_table(['a']) + b'\x42\x01\x01')
+        self.assertEqual({1: 'a'}, doc.dictionary)
+        doc.dictionary[1] = 'changed'   # a copy
+        self.assertEqual('<a></a>', doc.render_xml())
+
     def test_limits_and_reset(self):
         s = BinaryXmlSession(max_table_bytes=5, max_document_bytes=500)
         with self.assertRaisesRegex(ValueError, 'size limit'):

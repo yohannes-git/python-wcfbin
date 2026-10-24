@@ -58,6 +58,26 @@ class XmlInputTests(unittest.TestCase):
             with self.subTest(xml=xml), self.assertRaises(ValueError):
                 XMLParser.parse(xml)
 
+    def test_undeclared_prefix(self):
+        for xml in ('<p:a/>', '<a p:b="1"/>', '<r xmlns:p="urn:p"><p:a/><q:b/></r>'):
+            for types in (None, {'/{urn:p}a': 'int32'}):
+                with self.subTest(xml=xml, types=types):
+                    with self.assertRaisesRegex(ValueError, 'Undeclared XML namespace prefix'):
+                        XMLParser.parse(xml, type_overrides=types)
+
+    def test_inputs(self):
+        # str, bytes and file objects; anything else is a wrong use
+        for data in ('<a>1</a>', b'<a>1</a>', io.StringIO('<a>1</a>'), io.BytesIO(b'<a>1</a>')):
+            with self.subTest(data=type(data).__name__):
+                self.assertEqual('<a>1</a>', render_xml(XMLParser.parse(data)))
+        with self.assertRaises(TypeError):
+            XMLParser.parse(42)
+        parser = XMLParser()
+        parser.feed('<a/>')
+        parser.close()
+        with self.assertRaisesRegex(ValueError, 'closed'):
+            parser.feed('<b/>')
+
     def test_empty_prefix(self):
         # ":a" is not a qualified name, the colon is not dropped
         for xml in ('<:a xmlns="urn:x"/>', '<a xmlns="urn:x" :b="1"/>'):
@@ -87,6 +107,27 @@ class XmlInputTests(unittest.TestCase):
         records = XMLParser.parse('<v>urn:uuid:%s</v>' % uuid.upper(),
                                   type_overrides={'/v': 'uniqueid'})
         self.assertEqual('urn:uuid:' + uuid, str(records[0].childs[0]))
+
+    def test_typed_literals(self):
+        import math
+        from wcf.records import BoolTextRecord, FloatTextRecord, DoubleTextRecord, Chars8TextRecord
+        for kind, text, cls, value in (('bool', 'false', BoolTextRecord, False),
+                                       ('bool', ' 0 ', BoolTextRecord, False),
+                                       ('bool', 'true', BoolTextRecord, True),
+                                       ('text', '8.0', Chars8TextRecord, '8.0'),
+                                       ('string', ' 8.0 ', Chars8TextRecord, ' 8.0 '),
+                                       ('float', 'INF', FloatTextRecord, math.inf),
+                                       ('double', '-INF', DoubleTextRecord, -math.inf)):
+            with self.subTest(kind=kind, text=text):
+                record = XMLParser.parse('<v>%s</v>' % text, type_overrides={'/v': kind})[0].childs[0]
+                self.assertIs(cls, type(record))
+                self.assertEqual(value, record.value)
+        for kind in ('float', 'double'):
+            record = XMLParser.parse('<v>NaN</v>', type_overrides={'/v': kind})[0].childs[0]
+            self.assertTrue(math.isnan(record.value))
+        for text in ('False', 'yes', '2'):
+            with self.subTest(text=text), self.assertRaises(ValueError):
+                XMLParser.parse('<v>%s</v>' % text, type_overrides={'/v': 'bool'})
 
     def test_uuid_literals(self):
         # what uuid.UUID() takes but the records would not render

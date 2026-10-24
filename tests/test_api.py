@@ -9,7 +9,10 @@ from wcf.records import (render_xml, ShortElementRecord, ElementRecord,
                          ShortXmlnsAttributeRecord, ZeroTextRecord,
                          Chars8TextRecord, UnicodeChars8TextRecord,
                          Bytes8TextRecord, Bytes32TextRecord,
-                         DatetimeTextRecord)
+                         DatetimeTextRecord, ShortAttributeRecord,
+                         AttributeRecord, ShortDictionaryAttributeRecord,
+                         PrefixDictionaryElementSRecord, PrefixAttributeKRecord,
+                         TrueTextRecord)
 
 
 class ConstructorTests(unittest.TestCase):
@@ -82,10 +85,78 @@ class ConstructorTests(unittest.TestCase):
         self.assertEqual('xmlns', ShortXmlnsAttributeRecord('urn:a').qname)
         self.assertEqual('xmlns:a', XmlnsAttributeRecord('a', 'urn:a').qname)
 
+    def test_qualified_names(self):
+        value = TrueTextRecord()
+        for record, qname in ((ShortElementRecord('a'), 'a'),
+                              (ElementRecord('p', 'a'), 'p:a'),
+                              (ShortDictionaryElementRecord(2), 'Envelope'),
+                              (PrefixDictionaryElementSRecord(2), 's:Envelope'),
+                              (ShortAttributeRecord('b', value), 'b'),
+                              (AttributeRecord('p', 'b', value), 'p:b'),
+                              (ShortDictionaryAttributeRecord(2, value), 'Envelope'),
+                              (PrefixAttributeKRecord('b', value), 'k:b')):
+            with self.subTest(record=type(record).__name__):
+                self.assertEqual(qname, record.qname)
+
+    def test_xmlns_namespace_and_prefix(self):
+        for args in ((b'urn:a',), ('a', b'urn:a'), ('a', None)):
+            with self.subTest(args=args), self.assertRaises(TypeError):
+                (XmlnsAttributeRecord if len(args) == 2 else ShortXmlnsAttributeRecord)(*args)
+        # "name" is the prefix, as the former attribute of that name
+        self.assertEqual('a', XmlnsAttributeRecord('a', 'urn:a').name)
+
+    def test_record_type_registered_once(self):
+        from wcf.records import Record
+
+        class Other(Record):
+            type = ShortElementRecord.type
+        with self.assertRaisesRegex(RuntimeError, 'registered twice'):
+            Record.add_records((Other,))
+        self.assertIs(ShortElementRecord, Record.records[ShortElementRecord.type])
+
     def test_parse_returns_the_subclass(self):
         class MyDateTime(DatetimeTextRecord):
             pass
         self.assertIs(MyDateTime, type(MyDateTime.parse(io.BytesIO(b'\x00' * 8))))
+
+
+
+class DatatypeTests(unittest.TestCase):
+
+    def test_multibyteint31_and_utf8string(self):
+        from wcf.datatypes import MultiByteInt31, Utf8String
+        self.assertEqual('300', str(MultiByteInt31(300)))
+        self.assertEqual('é', Utf8String('é'.encode()).value)
+        self.assertEqual(b'\x02\xc3\xa9', Utf8String('é'.encode()).to_bytes())
+
+    def test_session_dictionary_view(self):
+        # the static table, then the session strings that it does not have
+        from wcf.dictionary import dictionary, dictionary_context
+        static = len(dictionary)
+        self.assertEqual(static, len(list(dictionary)))
+        with dictionary_context({1: 'x', 3: 'y'}):
+            self.assertEqual(static + 2, len(dictionary))
+            self.assertEqual([1, 3], [k for k in dictionary if k % 2])
+            self.assertEqual('y', dictionary[3])
+        self.assertEqual(static, len(dictionary))
+
+    def test_local_offset_where_the_host_cannot_compute_it(self):
+        # time.localtime() refuses a date beyond the platform's time_t:
+        # the current offset of the host is used
+        from unittest import mock
+        from wcf.records import text
+        real = text.time.localtime
+        calls = []
+
+        def localtime(*args):
+            calls.append(args)
+            if args:
+                raise OverflowError('timestamp out of range')
+            return real()
+        with mock.patch.object(text.time, 'localtime', localtime):
+            offset = text._local_utc_offset(0)
+        self.assertEqual(real().tm_gmtoff * 10 ** 7, offset)
+        self.assertEqual(2, len(calls))
 
 
 if __name__ == '__main__':

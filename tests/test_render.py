@@ -61,6 +61,28 @@ class RenderInjectionTests(unittest.TestCase):
             b'\x04\x02_a\x98\x01v\x01'))
 
 
+    def test_records_that_xml_cannot_carry(self):
+        from wcf.records import EndListTextRecord, EndElementRecord
+        with self.assertRaisesRegex(ValueError, 'EndListText without StartListText'):
+            render_xml([ShortElementRecord('a'), EndListTextRecord()])
+        for record in (EndElementRecord(), ShortAttributeRecord('b', Chars8TextRecord('v'))):
+            with self.subTest(record=type(record).__name__):
+                with self.assertRaisesRegex(ValueError, 'Cannot render record'):
+                    render_xml([record])
+
+    def test_repr_records(self):
+        # one record per line, indented by depth
+        import contextlib
+        from wcf.records import repr_records
+        records = render(b'\x40\x01a\x40\x01b\x99\x01x\x02\x01c\x01')
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            repr_records(Record.parse(io.BytesIO(
+                b'\x40\x01a\x40\x01b\x99\x01x\x02\x01c\x01')))
+            repr_records(None)
+        self.assertEqual(['<a>', ' <b>', '  x', ' <!--c-->'], out.getvalue().splitlines())
+        self.assertEqual('<a><b>x</b><!--c--></a>', records)
+
     def test_long_names_are_not_kept(self):
         # the check of the names is cached; a long name would stay in
         # memory after its document is gone
